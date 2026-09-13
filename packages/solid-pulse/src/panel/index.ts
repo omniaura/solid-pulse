@@ -219,12 +219,17 @@ export function mountPanel(pulse: Pulse, options: PanelOptions = {}) {
   // ── Query tab ────────────────────────────────────────────────────
   const queryBody = h("div", { class: "sp-body" });
   const querySlot = h("div", { "data-slot": "query-devtools" });
+  const queryHint = h("span", { class: "sp-dim" });
+  const refreshQueryHint = () => {
+    queryHint.textContent = controller.has("inspect.queries") ? "solid-query adapter attached" : "attach with attachQueryClient(pulse, queryClient) to enable";
+  };
+  refreshQueryHint();
   queryBody.append(
     h("div", { class: "sp-row" },
       h("button", { class: "sp-btn", type: "button", "data-command": "inspect.queries", onclick: () => void run("inspect.queries", { active: true }).then((r) => showResult(queryBody, r.ok ? r.value : r.error)) }, "Active queries"),
       h("button", { class: "sp-btn", type: "button", "data-command": "query.invalidate", onclick: () => void run("query.invalidate").then((r) => showResult(queryBody, r.ok ? r.value : r.error)) }, "Invalidate all"),
       h("button", { class: "sp-btn", type: "button", "data-command": "query.reset", onclick: () => void run("query.reset").then((r) => showResult(queryBody, r.ok ? r.value : r.error)) }, "Reset all"),
-      h("span", { class: "sp-dim" }, controller.has("inspect.queries") ? "solid-query adapter attached" : "attach with attachQueryClient(pulse, queryClient) to enable"),
+      queryHint,
     ),
     querySlot,
   );
@@ -381,6 +386,7 @@ export function mountPanel(pulse: Pulse, options: PanelOptions = {}) {
     for (const [tid, body] of bodies) body.hidden = tid !== id;
     for (const [tid, btn] of tabButtons) btn.setAttribute("aria-selected", tid === id ? "true" : "false");
     if (id === "pulse") void run("events.list", { limit: rows }).then((r) => renderList(r.ok ? (r.value as PulseEvent[]) : []));
+    if (id === "query") refreshQueryHint();
     if (id === "scenarios") void refreshScenario();
     if (id === "record") void refreshRecordings();
   }

@@ -33,7 +33,11 @@ export interface SolidPulseVitePluginOptions {
   panel?: boolean;
   /** Options forwarded to `initPulse` (JSON-serialisable). */
   runtimeOptions?: Record<string, unknown>;
-  /** Extra module to import after init (e.g. your `./pulse-setup.ts` that attaches the QueryClient). */
+  /**
+   * Module that `export default (pulse) => void`, imported before the app's
+   * entry so adapters (attachQueryClient, attachScenarioCommands) are in
+   * place for the first render. E.g. "/src/pulse-setup.ts".
+   */
   setupModule?: string;
 }
 
@@ -62,12 +66,17 @@ export default function solidPulse(options: SolidPulseVitePluginOptions = {}): P
     load(id) {
       if (id !== RESOLVED_VIRTUAL_INIT) return null;
       const opts = { bridge: bridge, ...runtimeOptions };
+      // The setup module is imported statically so it is evaluated before the
+      // app's entry module runs (and before the first render): adapters such as
+      // attachQueryClient must exist when the first observers subscribe. It
+      // must `export default (pulse) => { ... }`.
       return [
         `import { initPulse } from "@omniaura/solid-pulse";`,
         panel ? `import { mountPanel } from "@omniaura/solid-pulse/panel";` : "",
+        setupModule ? `import setup from ${JSON.stringify(setupModule)};` : "",
         `const pulse = initPulse(${JSON.stringify(opts)});`,
+        setupModule ? `try { if (typeof setup === "function") setup(pulse); else console.warn("[solid-pulse] setup module must export default (pulse) => void"); } catch (e) { console.warn("[solid-pulse] setup module failed", e); }` : "",
         panel ? `mountPanel(pulse);` : "",
-        setupModule ? `import(${JSON.stringify(setupModule)}).catch((e) => console.warn("[solid-pulse] setup module failed", e));` : "",
         `export default pulse;`,
       ]
         .filter(Boolean)

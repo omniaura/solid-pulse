@@ -76,13 +76,15 @@ export function initPulse(options: PulseOptions = {}): Pulse {
     overlay?.mount();
     solid = installSolid(controller);
     dom = installDom(controller, solid, overlay);
-    net = installNetwork(controller, solid);
+    // The bridge grabs the native WebSocket before network instrumentation
+    // wraps the global, so our own transport never appears in the events.
     if (options.bridge) {
       const opts: BridgeClientOptions =
         options.bridge === true ? {} : typeof options.bridge === "string" ? { url: options.bridge } : options.bridge;
       bridge = new BridgeClient(controller, opts);
-      bridge.connect();
     }
+    net = installNetwork(controller, solid, { ignoreUrl: (url) => url.includes("/__pulse/") });
+    bridge?.connect();
     if (options.banner !== false) {
       console.log(
         "%c◉ solid-pulse%c dev instrumentation on · window.__SOLID_PULSE__.run(cmd) · CLI: solid-pulse commands",

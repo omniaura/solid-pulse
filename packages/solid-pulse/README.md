@@ -55,7 +55,7 @@ import { attachQueryClient } from "@omniaura/solid-pulse/query";
 attachQueryClient(pulse, queryClient);
 ```
 
-Read-only: it subscribes to the `QueryCache`/`MutationCache` and never changes query behaviour. With the Vite plugin, point `setupModule` at a file that does this (it is imported right after `initPulse`).
+Read-only: it subscribes to the `QueryCache`/`MutationCache` and never changes query behaviour. With the Vite plugin, point `setupModule: "/src/pulse-setup.ts"` at a module that `export default (pulse) => { attachQueryClient(pulse, queryClient) }` — it is evaluated before your app's entry module, so the very first observers are attributed.
 
 ### Overlay
 

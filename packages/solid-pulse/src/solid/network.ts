@@ -42,8 +42,14 @@ function preview(data: unknown, on: boolean): string | undefined {
   return undefined;
 }
 
-export function installNetwork(controller: PulseController, solid: SolidInstrumentation | null): NetworkInstrumentation {
+export interface NetworkOptions {
+  /** URLs to leave untraced (e.g. the devtools' own bridge). */
+  ignoreUrl?: (url: string) => boolean;
+}
+
+export function installNetwork(controller: PulseController, solid: SolidInstrumentation | null, options: NetworkOptions = {}): NetworkInstrumentation {
   const bus = controller.bus;
+  const ignored = (url: string) => options.ignoreUrl?.(url) === true;
   let nextId = 1;
   const g = globalThis as unknown as { fetch: typeof fetch; WebSocket: typeof WebSocket; EventSource?: typeof EventSource };
   const origFetch = g.fetch;
@@ -98,9 +104,10 @@ export function installNetwork(controller: PulseController, solid: SolidInstrume
 
   g.fetch = function pulseFetch(this: unknown, input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
     if (!controller.isOn("network")) return origFetch.call(this, input, init);
-    const id = nextId++;
     const req = typeof Request !== "undefined" && input instanceof Request ? input : null;
     const rawUrl = req ? req.url : input instanceof URL ? input.href : String(input);
+    if (ignored(rawUrl)) return origFetch.call(this, input, init);
+    const id = nextId++;
     const url = redactUrl(rawUrl);
     const method = (init?.method ?? req?.method ?? "GET").toUpperCase();
     const start = performance.now();
@@ -138,6 +145,7 @@ export function installNetwork(controller: PulseController, solid: SolidInstrume
   class PulseWebSocket extends NativeWebSocket {
     constructor(url: string | URL, protocols?: string | string[]) {
       super(url, protocols);
+      if (ignored(typeof url === "string" ? url : url.href)) return;
       const id = nextId++;
       const safeUrl = redactUrl(typeof url === "string" ? url : url.href);
       const openedAt = performance.now();
@@ -181,6 +189,7 @@ export function installNetwork(controller: PulseController, solid: SolidInstrume
     class PulseEventSource extends NativeEventSource {
       constructor(url: string | URL, init?: EventSourceInit) {
         super(url, init);
+        if (ignored(typeof url === "string" ? url : url.href)) return;
         const id = nextId++;
         const safeUrl = redactUrl(typeof url === "string" ? url : url.href);
         const openedAt = performance.now();
