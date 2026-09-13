@@ -57,6 +57,10 @@ attachQueryClient(pulse, queryClient);
 
 Read-only: it subscribes to the `QueryCache`/`MutationCache` and never changes query behaviour. With the Vite plugin, point `setupModule: "/src/pulse-setup.ts"` at a module that `export default (pulse) => { attachQueryClient(pulse, queryClient) }` — it is evaluated before your app's entry module, so the very first observers are attributed.
 
+### Panel placement
+
+`mountPanel(pulse, { fab: false })` hides the floating ◉ button — use it in simulator/QA builds where a fixed button could cover app chrome (on a mobile viewport it sits exactly over a bottom tab bar and intercepts taps). The panel stays reachable via **Alt+Shift+P** (`hotkey` option), `solid-pulse panel.open`, or `window.__SOLID_PULSE__.run("panel.open")`.
+
 ### Overlay
 
 A single `position: fixed; pointer-events: none` container draws flash rectangles (amber = DOM change, green = mount, red = reattach, blue = query, purple = highlight) and a transient badge centred on the component that initiates/observes a query, showing the redacted query key. No layout shift, no focus, capped at 48 live rectangles and 4 badges; respects `prefers-reduced-motion`.

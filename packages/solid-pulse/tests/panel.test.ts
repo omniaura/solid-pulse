@@ -44,6 +44,17 @@ describe("panel ↔ CLI parity", () => {
     expect(box.checked).toBe(true);
 
     panel.destroy();
+
+    // fab:false hides the floating button (it must never sit over app chrome in
+    // a harness) while the hotkey and the commands still open the panel.
+    const quiet = mountPanel(pulse, { fab: false });
+    expect(document.querySelector<HTMLButtonElement>(".sp-fab")!.hidden).toBe(true);
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "P", altKey: true, shiftKey: true, bubbles: true }));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(await pulse.run("panel.status")).toMatchObject({ ok: true, value: { open: true } });
+    await pulse.run("panel.close");
+    expect(document.querySelector<HTMLButtonElement>(".sp-fab")!.hidden).toBe(true);
+    quiet.destroy();
     pulse.destroy();
     expect(window.__SOLID_PULSE__).toBeUndefined();
   });

@@ -25,6 +25,15 @@ export interface PanelOptions {
   position?: "bottom-left" | "bottom-right";
   /** Max rows in the live list (default 150). */
   rows?: number;
+  /**
+   * Show the floating ◉ button (default true). Set false where a fixed button
+   * could sit over app chrome — e.g. mobile viewports in an automated harness,
+   * where it would intercept taps on a bottom tab bar. The panel stays reachable
+   * through the hotkey, `panel.open` from the CLI, or `window.__SOLID_PULSE__`.
+   */
+  fab?: boolean;
+  /** Keyboard shortcut that toggles the panel (default "Alt+Shift+P"; false disables). */
+  hotkey?: string | false;
 }
 
 type Attrs = Record<string, string | boolean | ((e: Event) => void) | undefined>;
@@ -70,6 +79,15 @@ const CSS = `
 .sp-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#6b7280;margin-right:4px}
 .sp-dot[data-on="1"]{background:#22c55e}
 `;
+
+/** "Alt+Shift+P" style matcher; modifier order does not matter, key is case-insensitive. */
+function matchesHotkey(e: KeyboardEvent, spec: string): boolean {
+  const parts = spec.split("+").map((p) => p.trim().toLowerCase());
+  const key = parts.find((p) => !["alt", "shift", "ctrl", "control", "meta", "cmd"].includes(p));
+  if (!key || e.key.toLowerCase() !== key) return false;
+  const want = (m: string) => parts.includes(m);
+  return e.altKey === want("alt") && e.shiftKey === want("shift") && e.ctrlKey === (want("ctrl") || want("control")) && e.metaKey === (want("meta") || want("cmd"));
+}
 
 function group(kind: string) {
   return kind.split(".")[0] ?? "pulse";
@@ -119,7 +137,15 @@ export function mountPanel(pulse: Pulse, options: PanelOptions = {}) {
   root.append(style);
   const fab = h("button", { class: "sp-fab", type: "button", title: "solid-pulse panel (also: solid-pulse panel.toggle)", "data-command": "panel.toggle", onclick: () => void controller.run("panel.toggle") }, "◉ pulse");
   fab.style[options.position === "bottom-right" ? "right" : "left"] = "12px";
+  if (options.fab === false) fab.hidden = true;
   root.append(fab);
+  const hotkey = options.hotkey === undefined ? "Alt+Shift+P" : options.hotkey;
+  const onKey = (e: KeyboardEvent) => {
+    if (!hotkey || !matchesHotkey(e, hotkey)) return;
+    e.preventDefault();
+    void controller.run("panel.toggle");
+  };
+  if (hotkey) document.addEventListener("keydown", onKey, true);
 
   let open = false;
   let drawer: HTMLDivElement | null = null;
@@ -402,7 +428,7 @@ export function mountPanel(pulse: Pulse, options: PanelOptions = {}) {
       refreshStatus();
     } else {
       drawer?.remove();
-      fab.hidden = false;
+      fab.hidden = options.fab === false;
     }
   }
 
@@ -435,6 +461,7 @@ export function mountPanel(pulse: Pulse, options: PanelOptions = {}) {
     open: () => setOpen(true),
     close: () => setOpen(false),
     destroy() {
+      if (hotkey) document.removeEventListener("keydown", onKey, true);
       for (const c of cleanups) c();
       for (const n of ["panel.open", "panel.close", "panel.toggle", "panel.tab", "panel.status"]) controller.unregister(n);
       root.remove();
