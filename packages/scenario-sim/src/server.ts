@@ -9,7 +9,7 @@
 import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
 import { WebSocketServer, type WebSocket } from "ws";
-import type { Simulator, UpgradeHook } from "./core/engine.js";
+import { isUpgraded, upgradedResponse, type Simulator, type UpgradeHook } from "./core/engine.js";
 import type { SocketTransport } from "./core/streams.js";
 
 export function toWebRequest(req: IncomingMessage, base: string): Request {
@@ -82,11 +82,11 @@ export function attachWebSockets(sim: Simulator, server: HttpServer, opts: { bas
           const sock = run.streams.openSocket(route, ctx, transport, protocol);
           ws.on("message", (data, isBinary) => run.streams.receive(route, ctx, sock, isBinary ? new Uint8Array(data as Buffer).buffer : data.toString()));
           ws.on("close", (code, reason) => run.streams.clientClosed(route, ctx, sock, code, reason.toString()));
-          resolve(new Response(null, { status: 101 }));
+          resolve(upgradedResponse());
         });
       });
     void sim.handle(request, { upgrade }).then((response) => {
-      if (response.status !== 101) {
+      if (!isUpgraded(response)) {
         socket.write(`HTTP/1.1 ${response.status} ${response.statusText || "Error"}\r\ncontent-type: application/json\r\nconnection: close\r\n\r\n`);
         void response.text().then((t) => {
           socket.write(t);

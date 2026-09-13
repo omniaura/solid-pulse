@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { Simulator } from "../src/core/engine.js";
+import { Simulator, isUpgraded, upgradedResponse } from "../src/core/engine.js";
 import type { SocketTransport, WsRoute } from "../src/core/streams.js";
 import { scenarios } from "../src/examples/notes-chat.js";
 
@@ -67,10 +67,10 @@ async function connectWs(sim: Simulator, path: string, opts: { run?: string; pro
       const sock = run.streams.openSocket(route, ctx, t.transport, protocol);
       inbound = (data) => run.streams.receive(route, ctx, sock, data);
       clientClose = (code, reason) => run.streams.clientClosed(route, ctx, sock, code, reason);
-      return new Response(null, { status: 101 });
+      return upgradedResponse();
     },
   });
-  return { status: res.status, protocol: selected as string | null, ...t, send: (frame: Record<string, unknown>) => inbound?.(JSON.stringify(frame)), close: (code = 1000, reason = "") => clientClose?.(code, reason) };
+  return { status: isUpgraded(res) ? 101 : res.status, protocol: selected as string | null, ...t, send: (frame: Record<string, unknown>) => inbound?.(JSON.stringify(frame)), close: (code = 1000, reason = "") => clientClose?.(code, reason) };
 }
 
 const settle = () => new Promise((r) => setTimeout(r, 5));

@@ -47,6 +47,15 @@ export interface SimulatorOptions {
   log?: (line: string) => void;
 }
 
+/**
+ * Marker for "the adapter completed the WebSocket upgrade". Node's undici
+ * refuses `new Response(null, { status: 101 })`, so adapters return a 200 with
+ * this header instead of a 101.
+ */
+export const UPGRADED_HEADER = "x-sim-upgraded";
+export const upgradedResponse = () => new Response(null, { status: 200, headers: { [UPGRADED_HEADER]: "1" } });
+export const isUpgraded = (response: Response) => response.headers.get(UPGRADED_HEADER) === "1";
+
 /** How an adapter completes a WebSocket upgrade for a matched route. */
 export type UpgradeHook = (route: WsRoute, ctx: StreamContext, run: Run, protocol: string | null) => Response | Promise<Response>;
 

@@ -7,7 +7,7 @@
  * app's calls.
  */
 
-import { Simulator, type SimulatorOptions, type UpgradeHook } from "./core/engine.js";
+import { isUpgraded, Simulator, upgradedResponse, type SimulatorOptions, type UpgradeHook } from "./core/engine.js";
 import type { SocketTransport } from "./core/streams.js";
 
 export interface BrowserSimulatorOptions extends SimulatorOptions {
@@ -88,10 +88,10 @@ class SimWebSocket extends EventTarget {
       this.inbound = (data) => run.streams.receive(route, ctx, sock, data);
       this.clientClose = (code, reason) => run.streams.clientClosed(route, ctx, sock, code, reason);
       this.dispatch(new Event("open"));
-      return new Response(null, { status: 101 });
+      return upgradedResponse();
     };
     const response = await this.sim.handle(request, { upgrade });
-    if (response.status !== 101) {
+    if (!isUpgraded(response)) {
       this.dispatch(new Event("error"));
       this.finish(1006, `upgrade failed: ${response.status}`, false);
     }
