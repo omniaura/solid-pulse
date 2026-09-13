@@ -151,6 +151,24 @@ describe("Simulator: stateful CRUD, isolation, determinism", () => {
     expect((await sim.handle(req("/api/notes"))).status).toBe(503);
     await sim.handle(req("/__sim/faults", { method: "POST", body: JSON.stringify({ failMode: "off" }) }));
 
+    // console-style per-request headers layer on top of the run's faults
+    expect((await sim.handle(req("/api/notes", { headers: { "x-sim-fail": "all" } }))).status).toBe(503);
+    expect((await sim.handle(req("/api/notes", { headers: { "x-sim-fail": "data" } }))).status).toBe(503);
+    expect((await sim.handle(req("/api/health", { headers: { "x-sim-fail": "data" } }))).status).toBe(200); // shellPaths still set from above
+    expect((await sim.handle(req("/api/notes"))).status).toBe(200);
+    const mc = new Simulator({ scenarios, defaultScenario: "notes-manual-clock" });
+    let settled = false;
+    const slow = mc.handle(req("/api/health", { headers: { "x-sim-latency": "250" } })).then((r) => ((settled = true), r));
+    await settle();
+    await mc.handle(req("/__sim/step", { method: "POST", body: JSON.stringify({ ms: 700 }) })); // 500 scenario + 250 header = 750 needed
+    await settle();
+    expect(settled).toBe(false);
+    await mc.handle(req("/__sim/step", { method: "POST", body: JSON.stringify({ ms: 60 }) }));
+    await settle();
+    expect(settled).toBe(true);
+    expect((await slow).status).toBe(200);
+    mc.dispose();
+
     const m = new Simulator({ scenarios, defaultScenario: "notes-malformed" });
     const r1 = await m.handle(req("/api/notes"));
     await expect(r1.json()).rejects.toThrow();

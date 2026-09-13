@@ -144,6 +144,20 @@ export class Simulator {
       const path = url.pathname;
       const method = request.method.toUpperCase();
 
+      // Per-request fault overrides (compatible with console-style mocks):
+      // `X-Sim-Latency: <ms>` and `X-Sim-Fail: off|data|all` apply to this
+      // request only, on top of the run's configured faults.
+      const latencyHeader = request.headers.get("x-sim-latency");
+      const failHeader = request.headers.get("x-sim-fail");
+      const extraLatency = latencyHeader !== null && latencyHeader !== "" && Number.isFinite(Number(latencyHeader)) ? Math.max(0, Number(latencyHeader)) : 0;
+      const failOverride = failHeader === "off" || failHeader === "data" || failHeader === "all" ? failHeader : null;
+      const failResponse = (p: string) => {
+        if (failOverride === null) return run.faults.failResponse(p);
+        if (failOverride === "off") return null;
+        if (failOverride === "data" && run.faults.shellPaths.has(p)) return null;
+        return problem(503, `scenario fail mode "${failOverride}" (X-Sim-Fail)`);
+      };
+
       // Overrides first: a forced answer for any path, even unrouted ones.
       const override = run.faults.matchOverride(path, method);
       if (override) {
@@ -164,7 +178,7 @@ export class Simulator {
           const requested = (request.headers.get("sec-websocket-protocol") ?? request.headers.get("x-sim-websocket-protocol") ?? "").split(",").map((s) => s.trim()).filter(Boolean);
           const protocol = route.protocols?.find((p) => requested.includes(p)) ?? null;
           if (route.protocols?.length && requested.length && !protocol) return this.withCors(request, problem(400, `unsupported subprotocol (server offers ${route.protocols.join(", ")})`));
-          const failed = run.faults.failResponse(path);
+          const failed = failResponse(path);
           if (failed) return this.withCors(request, failed);
           return options.upgrade(route, this.streamContext(run, request, url, params), run, protocol);
         }
@@ -172,10 +186,10 @@ export class Simulator {
       }
 
       // Fail mode (after overrides so a test can still force a success).
-      const failed = run.faults.failResponse(path);
+      const failed = failResponse(path);
       if (failed) {
-        run.log(`${method} ${path} → fail mode ${run.faults.failMode}`);
-        await run.clock.sleep(run.faults.delayFor(), "fail-mode latency");
+        run.log(`${method} ${path} → fail mode ${failOverride ?? run.faults.failMode}`);
+        await run.clock.sleep(run.faults.delayFor(extraLatency), "fail-mode latency");
         return this.withCors(request, failed);
       }
 
@@ -184,7 +198,7 @@ export class Simulator {
         if ((route.method ?? "GET") !== method) continue;
         const params = matchPath(route.path, path);
         if (!params) continue;
-        await run.clock.sleep(run.faults.delayFor(), "sse open latency");
+        await run.clock.sleep(run.faults.delayFor(extraLatency), "sse open latency");
         const stream = run.streams.openSse(route, this.streamContext(run, request, url, params));
         return this.withCors(request, stream.response);
       }
@@ -197,7 +211,7 @@ export class Simulator {
         route.calls++;
         const ctx = this.routeContext(run, request, url, params, route.calls);
         const started = run.clock.now();
-        await run.clock.sleep(run.faults.delayFor(), `latency ${method} ${path}`);
+        await run.clock.sleep(run.faults.delayFor(extraLatency), `latency ${method} ${path}`);
         const response = await route.handler(ctx);
         run.log(`${method} ${path} → ${response.status}`, { route: route.name ?? route.path, ms: Math.round(run.clock.now() - started) });
         return this.withCors(request, response);

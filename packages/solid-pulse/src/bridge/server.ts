@@ -289,7 +289,15 @@ export class BridgeServer {
         c.pending.delete(id);
         resolve({ ok: false, error: `command timed out after ${this.opts.commandTimeoutMs}ms` });
       }, this.opts.commandTimeoutMs);
-      c.pending.set(id, { resolve, timer });
+      c.pending.set(id, {
+        resolve: (result) => {
+          // Keep the mirror in step with the page: a cleared page buffer must
+          // not keep serving stale history to `events`.
+          if (name === "events.clear" && result.ok) c.buffer.clear();
+          resolve(result);
+        },
+        timer,
+      });
       c.ws.send(JSON.stringify(frame));
     });
   }

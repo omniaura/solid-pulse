@@ -121,6 +121,13 @@ export function installDom(controller: PulseController, solid: SolidInstrumentat
   };
   document.addEventListener("scroll", onScroll, { capture: true, passive: true });
   document.addEventListener("focusin", onFocusIn, true);
+  // Headless/background pages often do not dispatch focusin for programmatic
+  // `el.focus()` (the window has no system focus), so also sample the active
+  // element cheaply; agent-driven QA relies on this.
+  const focusPoll = setInterval(() => {
+    const active = document.activeElement;
+    if (active && active !== document.body && active !== document.documentElement && !isOwn(active)) lastFocused = active;
+  }, 200);
 
   function attributionFor(target: Element, flushComps: ComponentRef[]): ComponentRef | null {
     if (flushComps.length === 1) return flushComps[0]!;
@@ -357,6 +364,7 @@ export function installDom(controller: PulseController, solid: SolidInstrumentat
   return {
     dispose() {
       observer.disconnect();
+      clearInterval(focusPoll);
       document.removeEventListener("scroll", onScroll, true);
       document.removeEventListener("focusin", onFocusIn, true);
       controller.unregister("inspect.element");

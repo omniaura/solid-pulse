@@ -95,7 +95,7 @@ scenario-sim serve ./scenarios.ts --port 4100 --scenario notes-happy
 
 **Overrides** win over routing and even over unrouted paths: `{matcher: "/api/notes", method: "GET", status: 503, times: 1}` fails the next list once, then the endpoint recovers. `malformed: "invalid-json" | "wrong-content-type" | "truncated" | "empty-200" | "html-500" | "schema-drift"` exercises client validation paths.
 
-**Fail modes**: `off`, `data` (5xx everything except `shellPaths`, so the app shell still boots), `all`.
+**Fail modes**: `off`, `data` (5xx everything except `shellPaths`, so the app shell still boots), `all`. Per request, `X-Sim-Latency: <ms>` and `X-Sim-Fail: off|data|all` headers layer on top of the run's faults (the same contract as header-driven console mocks, so a tab or a curl can opt into its own faults).
 
 Attach to solid-pulse so the panel's Scenarios tab and `solid-pulse scenario.*` drive it:
 
