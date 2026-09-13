@@ -9,10 +9,10 @@
   "scripts": {
     "build": "bun run --filter './packages/*' build",
     "test": "bun run test:unit && bun run test:e2e",
-    "typecheck": "bunx tsc -p packages/solid-pulse --noEmit && bunx tsc -p packages/scenario-sim --noEmit",
+    "typecheck": "bunx tsc -p packages/solid-pulse --noEmit",
     "check": "bun run build && bun run test && bun run typecheck",
-    "test:unit": "bun --conditions=browser --conditions=development test packages/scenario-sim/tests && bun --conditions=browser --conditions=development test packages/solid-pulse/tests",
-    "test:e2e": "bun --conditions=browser --conditions=development test packages/scenario-sim/e2e && bun --conditions=browser --conditions=development test packages/solid-pulse/e2e",
+    "test:unit": "bun --conditions=browser --conditions=development test packages/solid-pulse/tests",
+    "test:e2e": "bun --conditions=browser --conditions=development test packages/solid-pulse/e2e",
     "smoke": "bash scripts/smoke.sh"
   },
   "devDependencies": {

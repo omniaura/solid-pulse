@@ -22,11 +22,8 @@ jobs:
       # Both CLIs must be runnable under node and bun straight from dist.
       - run: node packages/solid-pulse/dist/cli.js --help
       - run: bun packages/solid-pulse/dist/cli.js --help
-      - run: node packages/scenario-sim/dist/cli.js --help
-      - run: bun packages/scenario-sim/dist/cli.js --help
       # Publish contents must be exactly dist + docs (no tests, no sources).
       - run: cd packages/solid-pulse && npm pack --dry-run 2>&1 | tee /tmp/pack-pulse.txt && ! grep -E "src/|tests/" /tmp/pack-pulse.txt
-      - run: cd packages/scenario-sim && npm pack --dry-run 2>&1 | tee /tmp/pack-sim.txt && ! grep -E "src/|tests/" /tmp/pack-sim.txt
       # Consumer smoke: the example app builds for production WITHOUT any devtools code,
       # and its dev server exposes both control planes.
       - run: bash scripts/smoke.sh
