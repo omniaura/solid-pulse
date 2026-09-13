@@ -72,6 +72,34 @@ export function initPulse(options: PulseOptions = {}): Pulse {
   let net: NetworkInstrumentation | null = null;
   let bridge: BridgeClient | null = null;
 
+  const bridgeFor = (opts: BridgeClientOptions) => {
+    const client = new BridgeClient(controller, opts);
+    return client;
+  };
+  controller.register(
+    { name: "bridge.status", summary: "Bridge transport state (url, connected, client id).", ui: "panel header › bridge dot" },
+    () => ({ configured: bridge !== null, connected: bridge?.connected ?? false, url: bridge?.url ?? null, clientId: bridge?.clientId ?? null }),
+  );
+  controller.register(
+    {
+      name: "bridge.connect",
+      summary: "Connect (or reconnect) to a bridge at runtime — for pages started without one, e.g. `window.__SOLID_PULSE__.run('bridge.connect', {url:'ws://127.0.0.1:4567/__pulse/ws'})` from agent-browser eval.",
+      args: { url: "ws(s):// URL (default: same origin /__pulse/ws)" },
+    },
+    (a) => {
+      bridge?.disconnect();
+      bridge = bridgeFor(a.url ? { url: String(a.url) } : {});
+      bridge.connect();
+      return { url: bridge.url, clientId: bridge.clientId };
+    },
+  );
+  controller.register({ name: "bridge.disconnect", summary: "Stop the bridge transport (events keep buffering in-page)." }, () => {
+    bridge?.disconnect();
+    const was = bridge?.url ?? null;
+    bridge = null;
+    return { disconnected: was };
+  });
+
   const boot = () => {
     overlay?.mount();
     solid = installSolid(controller);
@@ -81,7 +109,7 @@ export function initPulse(options: PulseOptions = {}): Pulse {
     if (options.bridge) {
       const opts: BridgeClientOptions =
         options.bridge === true ? {} : typeof options.bridge === "string" ? { url: options.bridge } : options.bridge;
-      bridge = new BridgeClient(controller, opts);
+      bridge = bridgeFor(opts);
     }
     net = installNetwork(controller, solid, { ignoreUrl: (url) => url.includes("/__pulse/") });
     bridge?.connect();

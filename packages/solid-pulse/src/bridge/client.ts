@@ -42,6 +42,7 @@ export class BridgeClient {
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
   private unsubscribe: (() => void) | null = null;
   private closed = false;
+  private attempts = 0;
   private NativeWebSocket: typeof WebSocket;
   readonly url: string;
   readonly clientId: string;
@@ -62,6 +63,7 @@ export class BridgeClient {
       this.ws = ws;
       ws.onopen = () => {
         this.connected = true;
+        this.attempts = 0;
         const hello: HelloFrame = {
           type: "hello",
           protocol: PROTOCOL_VERSION,
@@ -89,12 +91,18 @@ export class BridgeClient {
         this.ws = null;
         this.unsubscribe?.();
         this.unsubscribe = null;
-        if (!this.closed) this.timer = setTimeout(() => this.connect(), this.options.reconnectMs ?? 2000);
+        if (!this.closed) this.timer = setTimeout(() => this.connect(), this.nextDelay());
       };
       ws.onerror = () => ws.close();
     } catch {
-      this.timer = setTimeout(() => this.connect(), this.options.reconnectMs ?? 2000);
+      this.timer = setTimeout(() => this.connect(), this.nextDelay());
     }
+  }
+
+  /** Exponential backoff (base → 30 s) so a missing bridge does not spam the console. */
+  private nextDelay() {
+    const base = this.options.reconnectMs ?? 2000;
+    return Math.min(30_000, base * 2 ** Math.min(this.attempts++, 6));
   }
 
   disconnect() {

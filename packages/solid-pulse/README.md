@@ -92,6 +92,10 @@ Options: `--url http://host:port[/__pulse]` (or `SOLID_PULSE_URL`; auto-discover
 
 In-page: `window.__SOLID_PULSE__.run("events.list", { kinds: "dom" })` — handy from `agent-browser eval` or Playwright `page.evaluate`.
 
+### Pages started without a bridge
+
+Built/preview bundles have no Vite dev server. Start `bunx solid-pulse bridge --port 4567`, then attach from the page — `window.__SOLID_PULSE__.run("bridge.connect", { url: "ws://127.0.0.1:4567/__pulse/ws" })` (e.g. via `agent-browser eval`) — or pass the URL in `initPulse({ bridge })`. Reconnects back off exponentially to 30 s, so an absent bridge never floods the console.
+
 ### HTTP API (what the CLI uses)
 
 ```
