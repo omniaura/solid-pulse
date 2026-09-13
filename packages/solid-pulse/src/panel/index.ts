@@ -373,7 +373,7 @@ export function mountPanel(pulse: Pulse, options: PanelOptions = {}) {
   }
 
   // ── Drawer ───────────────────────────────────────────────────────
-  const bridgeDot = h("span", { class: "sp-dot" });
+  const bridgeDot = h("span", { class: "sp-dot", "data-command": "bridge.status", title: "bridge status (solid-pulse bridge.status)" });
   const recDot = h("span", { class: "sp-dot" });
   const statusText = h("span", { "data-command": "panel.status" });
   function refreshStatus() {
