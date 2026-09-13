@@ -5,7 +5,7 @@ const browser = {
   dts: true,
   sourcemap: true,
   platform: "browser" as const,
-  external: ["solid-js", "@tanstack/query-core"],
+  external: ["solid-js", "solid-js/web", "@tanstack/query-core", "@tanstack/solid-query-devtools"],
   target: "es2022",
 };
 
@@ -17,6 +17,7 @@ export default defineConfig([
       core: "src/core/index.ts",
       query: "src/query/index.ts",
       panel: "src/panel/index.ts",
+      tanstack: "src/tanstack/index.ts",
     },
     clean: true,
   },

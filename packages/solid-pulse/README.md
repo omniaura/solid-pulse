@@ -61,6 +61,16 @@ Read-only: it subscribes to the `QueryCache`/`MutationCache` and never changes q
 
 `mountPanel(pulse, { fab: false })` hides the floating ◉ button — use it in simulator/QA builds where a fixed button could cover app chrome (on a mobile viewport it sits exactly over a bottom tab bar and intercepts taps). The panel stays reachable via **Alt+Shift+P** (`hotkey` option), `solid-pulse panel.open`, or `window.__SOLID_PULSE__.run("panel.open")`.
 
+### The combined panel (pulse + TanStack Query devtools)
+
+```ts
+import { mountPanel } from "@omniaura/solid-pulse/panel";
+import { tanstackQueryTab } from "@omniaura/solid-pulse/tanstack";
+mountPanel(pulse, { tabs: [tanstackQueryTab({ client: queryClient })] });
+```
+
+One drawer, one hotkey, one CLI: solid-pulse's Pulse / Query / Grab / Scenarios / Record tabs plus TanStack's own `SolidQueryDevtoolsPanel` as a **TanStack** tab (`solid-pulse panel.open tab=tanstack`). `@tanstack/solid-query-devtools` is an optional peer loaded on first open; pass `load` to inject it (or a double) yourself.
+
 ### Overlay
 
 A single `position: fixed; pointer-events: none` container draws flash rectangles (amber = DOM change, green = mount, red = reattach, blue = query, purple = highlight) and a transient badge centred on the component that initiates/observes a query, showing the redacted query key. No layout shift, no focus, capped at 48 live rectangles and 4 badges; respects `prefers-reduced-motion`.
