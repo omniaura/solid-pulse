@@ -19,6 +19,12 @@ export interface BrowserSimulatorOptions extends SimulatorOptions {
   run?: string;
 }
 
+function frameType(data: unknown): string | null {
+  if (typeof data !== "string" || data.length > 65536 || data[0] !== "{") return null;
+  const m = /"type"\s*:\s*"([^"]{1,80})"/.exec(data);
+  return m ? m[1]! : null;
+}
+
 /** CloseEvent with code/reason even where the host's CloseEvent ignores its init dict. */
 function makeCloseEvent(code: number, reason: string, wasClean: boolean): CloseEvent {
   let ev: CloseEvent;
@@ -214,6 +220,28 @@ class SimEventSource extends EventTarget {
   }
 }
 
+/**
+ * When @omniaura/solid-pulse instrumented the globals BEFORE this shim was
+ * installed, calls that we answer never reach pulse's wrappers, so we report
+ * them to pulse's bus ourselves (same event kinds). When pulse installs after
+ * us it wraps this shim and reports on its own — then we stay quiet.
+ */
+interface PulseBusLike {
+  bus: { emit(kind: string, data: Record<string, unknown>, extra?: Record<string, unknown>): unknown };
+  controller: { isOn(feature: string): boolean };
+}
+function pulseReporter(alreadyWrapped: boolean) {
+  const pulse = () => (globalThis as unknown as { __SOLID_PULSE__?: PulseBusLike }).__SOLID_PULSE__;
+  const on = () => alreadyWrapped && pulse()?.controller.isOn("network") === true;
+  let nextId = 100_000;
+  return {
+    id: () => nextId++,
+    emit(kind: string, data: Record<string, unknown>) {
+      if (on()) pulse()!.bus.emit(kind, { ...data, via: "scenario-sim" });
+    },
+  };
+}
+
 export function installBrowserSimulator(options: BrowserSimulatorOptions) {
   const sim = new Simulator(options);
   const origin = options.origin ?? location.origin;
@@ -224,6 +252,7 @@ export function installBrowserSimulator(options: BrowserSimulatorOptions) {
   const nativeFetch = g.fetch;
   const NativeWebSocket = g.WebSocket;
   const NativeEventSource = g.EventSource;
+  const report = pulseReporter((NativeWebSocket as unknown as { __solidPulse?: boolean }).__solidPulse === true || (nativeFetch as unknown as { __solidPulse?: boolean }).__solidPulse === true);
 
   g.fetch = function simFetch(this: unknown, input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
     const src = typeof Request !== "undefined" && input instanceof Request ? input : null;
@@ -242,7 +271,15 @@ export function installBrowserSimulator(options: BrowserSimulatorOptions) {
     if (!headers.has("x-sim-run")) headers.set("x-sim-run", runId);
     const bodyless = method === "GET" || method === "HEAD";
     const bodyP: Promise<BodyInit | null | undefined> = bodyless ? Promise.resolve(undefined) : init?.body !== undefined ? Promise.resolve(init.body) : src ? src.clone().text() : Promise.resolve(undefined);
-    return bodyP.then((body) => sim.handle(new Request(url, { method, headers, body: body ?? undefined, signal: init?.signal ?? src?.signal ?? undefined })));
+    const id = report.id();
+    const started = performance.now();
+    report.emit("net.fetch.start", { id, method, url: url.pathname + url.search });
+    return bodyP
+      .then((body) => sim.handle(new Request(url, { method, headers, body: body ?? undefined, signal: init?.signal ?? src?.signal ?? undefined })))
+      .then((res) => {
+        report.emit("net.fetch.end", { id, method, url: url.pathname + url.search, status: res.status, ok: res.ok, ms: Math.round((performance.now() - started) * 100) / 100, contentType: res.headers.get("content-type") ?? "", sse: (res.headers.get("content-type") ?? "").includes("text/event-stream") });
+        return res;
+      });
   } as typeof fetch;
 
   g.WebSocket = class extends SimWebSocket {
@@ -253,6 +290,28 @@ export function installBrowserSimulator(options: BrowserSimulatorOptions) {
         return new NativeWebSocket(url, protocols) as unknown as SimWebSocket;
       }
       super(u.href, protocols, sim, runId);
+      const id = report.id();
+      const safeUrl = u.pathname + u.search.replace(/([?&](?:ticket|token)=)[^&]*/gi, "$1[redacted]");
+      const openedAt = performance.now();
+      let inbound = 0;
+      let outbound = 0;
+      report.emit("net.ws.open", { id, url: safeUrl, protocols: protocols ? ([] as string[]).concat(protocols) : [], state: "connecting" });
+      this.addEventListener("open", () => report.emit("net.ws.open", { id, url: safeUrl, protocol: this.protocol, state: "open", ms: Math.round(performance.now() - openedAt) }));
+      this.addEventListener("message", (ev) => {
+        inbound++;
+        const data = (ev as MessageEvent).data as unknown;
+        report.emit("net.ws.message", { id, url: safeUrl, dir: "in", n: inbound, bytes: typeof data === "string" ? data.length : null, type: frameType(data) });
+      });
+      this.addEventListener("close", (ev) => {
+        const e = ev as CloseEvent;
+        report.emit("net.ws.close", { id, url: safeUrl, code: e.code, reason: e.reason, wasClean: e.wasClean, inbound, outbound, ms: Math.round(performance.now() - openedAt) });
+      });
+      const origSend = this.send.bind(this);
+      this.send = (data: string | ArrayBufferLike | Blob | ArrayBufferView) => {
+        outbound++;
+        report.emit("net.ws.message", { id, url: safeUrl, dir: "out", n: outbound, bytes: typeof data === "string" ? data.length : null, type: frameType(data) });
+        return origSend(data);
+      };
     }
   } as unknown as typeof WebSocket;
 

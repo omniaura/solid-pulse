@@ -102,7 +102,7 @@ export function installNetwork(controller: PulseController, solid: SolidInstrume
     return new Response(body, { status: res.status, statusText: res.statusText, headers: res.headers });
   }
 
-  g.fetch = function pulseFetch(this: unknown, input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const pulseFetch = function pulseFetch(this: unknown, input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
     if (!controller.isOn("network")) return origFetch.call(this, input, init);
     const req = typeof Request !== "undefined" && input instanceof Request ? input : null;
     const rawUrl = req ? req.url : input instanceof URL ? input.href : String(input);
@@ -138,7 +138,11 @@ export function installNetwork(controller: PulseController, solid: SolidInstrume
         throw err;
       },
     );
-  } as typeof fetch;
+  } as typeof fetch & { __solidPulse?: true };
+  // Marker so cooperating shims (e.g. @omniaura/scenario-sim/browser) can tell
+  // they are wrapping pulse — and must report to pulse's bus themselves.
+  pulseFetch.__solidPulse = true;
+  g.fetch = pulseFetch;
 
   // ── WebSocket ────────────────────────────────────────────────────
 
@@ -181,6 +185,7 @@ export function installNetwork(controller: PulseController, solid: SolidInstrume
       };
     }
   }
+  (PulseWebSocket as unknown as { __solidPulse?: true }).__solidPulse = true;
   g.WebSocket = PulseWebSocket as unknown as typeof WebSocket;
 
   // ── EventSource ──────────────────────────────────────────────────
@@ -223,6 +228,7 @@ export function installNetwork(controller: PulseController, solid: SolidInstrume
         };
       }
     }
+    (PulseEventSource as unknown as { __solidPulse?: true }).__solidPulse = true;
     g.EventSource = PulseEventSource as unknown as typeof EventSource;
   }
 
