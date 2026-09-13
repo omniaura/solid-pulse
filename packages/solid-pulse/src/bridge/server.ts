@@ -300,7 +300,7 @@ export class BridgeServer {
   }
 
   close() {
-    for (const c of this.clients.values()) c.ws.close(1001, "bridge closing");
+    for (const c of this.clients.values()) c.ws.terminate();
     this.clients.clear();
     this.wss.close();
   }
@@ -337,7 +337,16 @@ export function startBridgeServer(options: StandaloneOptions = {}) {
     close: () =>
       new Promise<void>((resolve) => {
         bridge.close();
-        server.close(() => resolve());
+        let done = false;
+        const finish = () => {
+          if (done) return;
+          done = true;
+          resolve();
+        };
+        server.close(finish);
+        // Keep-alive HTTP and open SSE connections would otherwise hold `close` open.
+        (server as unknown as { closeAllConnections?: () => void }).closeAllConnections?.();
+        setTimeout(finish, 500).unref?.();
       }),
   };
 }

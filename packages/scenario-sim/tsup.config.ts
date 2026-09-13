@@ -2,7 +2,7 @@ import { defineConfig } from "tsup";
 
 export default defineConfig([
   {
-    entry: { index: "src/index.ts", browser: "src/browser.ts", pulse: "src/pulse.ts" },
+    entry: { index: "src/index.ts", browser: "src/browser.ts", pulse: "src/pulse.ts", examples: "src/examples.ts" },
     format: ["esm"],
     dts: true,
     sourcemap: true,

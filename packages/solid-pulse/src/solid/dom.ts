@@ -78,6 +78,22 @@ export interface DomInstrumentation {
   dispose(): void;
 }
 
+/**
+ * Run after the next paint — or after 50 ms if no frame comes (hidden tabs and
+ * headless runs throttle requestAnimationFrame, and a reattach report must not
+ * wait for the tab to be foregrounded).
+ */
+function nextFrame(fn: () => void) {
+  let done = false;
+  const run = () => {
+    if (done) return;
+    done = true;
+    fn();
+  };
+  if (typeof requestAnimationFrame === "function") requestAnimationFrame(run);
+  setTimeout(run, 50);
+}
+
 export function installDom(controller: PulseController, solid: SolidInstrumentation | null, overlay: FlashOverlay | null): DomInstrumentation {
   const bus = controller.bus;
   const scrollTops = new Map<Element, number>();
@@ -130,6 +146,7 @@ export function installDom(controller: PulseController, solid: SolidInstrumentat
   }
 
   const observer = new MutationObserver((records) => {
+    if ((globalThis as { __PULSE_DEBUG?: boolean }).__PULSE_DEBUG) console.error("DBG-MO", records.map((r) => `${r.type}:${(r.target as Element).tagName ?? "?"}:+${r.addedNodes.length}/-${r.removedNodes.length}`).join(" "), "dom on:", controller.isOn("dom"));
     if (!controller.isOn("dom")) return;
     const t = now();
     const flush = solid?.flushId() ?? 0;
@@ -233,7 +250,7 @@ export function installDom(controller: PulseController, solid: SolidInstrumentat
     }
 
     if (reattached.length) {
-      requestAnimationFrame(() => {
+      nextFrame(() => {
         const t2 = now();
         for (const { node, rec } of reattached) {
           const scrollReset = rec.scrollers.map((s) => ({

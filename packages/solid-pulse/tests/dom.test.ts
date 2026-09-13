@@ -10,6 +10,17 @@ const flushMO = async () => {
   await new Promise((r) => setTimeout(r, 0));
 };
 
+/** MutationObserver/rAF delivery timing varies by host and load: poll instead of counting ticks. */
+const waitFor = async <T,>(get: () => T | undefined | null | false, label = "event", ms = 1500): Promise<T> => {
+  const end = Date.now() + ms;
+  for (;;) {
+    const v = get();
+    if (v) return v;
+    if (Date.now() > end) throw new Error(`waitFor timed out: ${label}`);
+    await flushMO();
+  }
+};
+
 describe("DOM observation", () => {
   test("reports real mutations, detach/reattach with scroll + focus loss, and inspects elements", async () => {
     document.body.innerHTML = `
@@ -32,7 +43,7 @@ describe("DOM observation", () => {
 
     // an attribute change is a dom.mutation
     app.setAttribute("data-x", "1");
-    await flushMO();
+    await waitFor(() => bus.list({ limit: 50 }).some((e) => e.kind === "dom.mutation"), "dom.mutation");
     let muts = bus.list({ limit: 50 }).filter((e) => e.kind === "dom.mutation");
     expect(muts.length).toBe(1);
     const summary = (muts[0]!.data as { summary: Array<{ id?: string; types: string[]; attrs?: string[]; component?: string | null }> }).summary;
@@ -50,11 +61,15 @@ describe("DOM observation", () => {
     scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
     composer.focus();
     expect(document.activeElement).toBe(composer);
+    // happy-dom may deliver focusin asynchronously (browsers do it synchronously);
+    // settle, then assert the tracked state the detach report is built from.
+    await flushMO();
+    expect(((await controller.run("inspect.focus")).value as { lastFocused: unknown }).lastFocused).toMatchObject({ id: "composer" });
+    expect(((await controller.run("inspect.scrollers")).value as Array<{ scrollTop: number }>)[0]!.scrollTop).toBe(120);
     bus.clear();
     const parent = surface.parentElement!;
     surface.remove();
-    await flushMO();
-    const detach = bus.list({ limit: 50 }).find((e) => e.kind === "dom.detach");
+    const detach = await waitFor(() => bus.list({ limit: 50 }).find((e) => e.kind === "dom.detach"), "dom.detach");
     expect(detach).toBeDefined();
     expect(detach!.data).toMatchObject({ hadFocus: true, element: { id: "surface", testId: "chat", component: "ChatFeed" } });
     expect((detach!.data.scrollers as Array<{ scrollTop: number }>)[0]!.scrollTop).toBe(120);
@@ -62,8 +77,7 @@ describe("DOM observation", () => {
 
     bus.clear();
     parent.appendChild(surface);
-    await flushMO();
-    const reattach = bus.list({ limit: 50 }).find((e) => e.kind === "dom.reattach");
+    const reattach = await waitFor(() => bus.list({ limit: 50 }).find((e) => e.kind === "dom.reattach"), "dom.reattach");
     expect(reattach).toBeDefined();
     const rd = reattach!.data as { gapMs: number; focusLost: boolean; scrollReset: Array<{ before: number; after: number; reset: boolean }>; selector: string };
     expect(rd.gapMs).toBeGreaterThanOrEqual(0);
@@ -86,6 +100,7 @@ describe("DOM observation", () => {
     controller.setFeature("dom", false);
     bus.clear();
     app.setAttribute("data-y", "2");
+    await flushMO();
     await flushMO();
     expect(bus.list({ limit: 50 }).length).toBe(0);
 
