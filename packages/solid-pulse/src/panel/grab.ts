@@ -53,7 +53,9 @@ export function discoverSolidGrab(pulse: Pulse) {
           pick.setAttribute('aria-pressed', String(status.picking));
           state.textContent = status.picking ? 'Click an element to copy its source context. Escape cancels.' : 'Pick an element, or hold ' + status.key + ' and click. Source context is copied for your coding agent.';
         };
-        el.append(pick, state, input, inspect, result);
+        const row = document.createElement('div'); row.className = 'sp-row';
+        row.append(input, inspect);
+        el.append(pick, state, row, result);
         const unsubscribe = api.subscribe(refresh);
         refresh();
         return () => { unsubscribe(); api.setPicking(false); api.setBadgeVisible(badge); };

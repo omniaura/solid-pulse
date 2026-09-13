@@ -73,8 +73,8 @@ const CSS = `
 .sp-drawer{pointer-events:auto;position:fixed;width:min(640px,calc(100vw - 24px));height:min(520px,calc(100dvh - 24px));max-height:calc(100dvh - 24px);background:#111827;border:1px solid #4b5563;border-radius:10px;display:flex;flex-direction:column;overflow:hidden;color-scheme:dark}
 .sp-head{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:8px 10px;border-bottom:1px solid #374151;cursor:move;touch-action:none}
 .sp-head b{color:#fbbf24}
-.sp-tabs{display:flex;gap:2px;overflow-x:auto;flex:0 0 100%;order:3;min-width:0}
-.sp-tab{background:transparent;border:1px solid transparent;color:#9ca3af;padding:3px 8px;border-radius:6px;cursor:pointer;font:inherit}
+.sp-tabs{display:flex;flex-wrap:wrap;gap:4px;flex:0 0 100%;order:3;min-width:0}
+.sp-tab{background:transparent;border:1px solid transparent;color:#b6c0ce;padding:5px 8px;min-height:30px;border-radius:6px;cursor:pointer;font:inherit}
 .sp-tab[aria-selected="true"]{color:#fff;border-color:#4b5563;background:#1f2937}
 .sp-body{flex:1;min-height:0;overflow:auto;padding:10px;overflow-wrap:anywhere}
 .sp-body[hidden]{display:none}
@@ -84,6 +84,7 @@ const CSS = `
 .sp-in{background:#111827;border:1px solid #4b5563;color:#e5e7eb;padding:5px 6px;border-radius:6px;font:inherit;min-width:100px;max-width:100%}
 .sp-in::placeholder{color:#9ca3af}
 .sp-head .sp-in{min-width:0}
+.sp-head [data-command="panel.close"]{margin-left:auto;min-width:32px;min-height:32px}
 .sp-body pre{white-space:pre-wrap;overflow-wrap:anywhere}
 .sp-btn:focus-visible,.sp-tab:focus-visible,.sp-fab:focus-visible,.sp-in:focus-visible{outline:2px solid #fbbf24;outline-offset:2px}
 .sp-list{font-size:11px;white-space:pre-wrap;word-break:break-word}
@@ -93,7 +94,7 @@ const CSS = `
 .sp-ev[data-warn="1"]{background:rgba(239,68,68,.15)}
 .sp-ev pre{margin:4px 0 6px 10px;color:#9ca3af;max-height:220px;overflow:auto}
 .sp-dim{color:#9ca3af}
-.sp-status{display:flex;flex-wrap:wrap;gap:8px;color:#9ca3af;font-size:11px;flex:0 0 100%;order:4}
+.sp-status{display:flex;flex-wrap:wrap;gap:8px;color:#b6c0ce;font-size:12px;flex:0 0 100%;order:4}
 .sp-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#6b7280;margin-right:4px}
 .sp-dot[data-on="1"]{background:#22c55e}
 `;
