@@ -64,8 +64,8 @@ describe("DOM observation", () => {
     // happy-dom may deliver focusin asynchronously (browsers do it synchronously);
     // settle, then assert the tracked state the detach report is built from.
     await flushMO();
-    expect(((await controller.run("inspect.focus")).value as { lastFocused: unknown }).lastFocused).toMatchObject({ id: "composer" });
-    expect(((await controller.run("inspect.scrollers")).value as Array<{ scrollTop: number }>)[0]!.scrollTop).toBe(120);
+    expect((((await controller.run("inspect.focus")) as { value: { lastFocused: unknown } }).value).lastFocused).toMatchObject({ id: "composer" });
+    expect((((await controller.run("inspect.scrollers")) as { value: Array<{ scrollTop: number }> }).value)[0]!.scrollTop).toBe(120);
     bus.clear();
     const parent = surface.parentElement!;
     surface.remove();

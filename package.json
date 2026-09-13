@@ -12,7 +12,8 @@
     "typecheck": "bunx tsc -p packages/solid-pulse --noEmit && bunx tsc -p packages/scenario-sim --noEmit",
     "check": "bun run build && bun run test && bun run typecheck",
     "test:unit": "bun --conditions=browser --conditions=development test packages/scenario-sim/tests && bun --conditions=browser --conditions=development test packages/solid-pulse/tests",
-    "test:e2e": "bun --conditions=browser --conditions=development test packages/scenario-sim/e2e && bun --conditions=browser --conditions=development test packages/solid-pulse/e2e"
+    "test:e2e": "bun --conditions=browser --conditions=development test packages/scenario-sim/e2e && bun --conditions=browser --conditions=development test packages/solid-pulse/e2e",
+    "smoke": "bash scripts/smoke.sh"
   },
   "devDependencies": {
     "@happy-dom/global-registrator": "^20.14.5",
@@ -22,6 +23,8 @@
     "solid-js": "^1.9.0",
     "tsup": "^8.0.0",
     "typescript": "^5.4.0",
-    "vite": "^7.0.0"
+    "vite": "^7.0.0",
+    "@semantic-release/git": "^10.0.1",
+    "semantic-release": "25"
   }
 }

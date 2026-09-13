@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>solid-pulse example</title>
+    <style>
+      body { font: 14px system-ui, sans-serif; margin: 0; display: grid; grid-template-columns: 280px 1fr; height: 100vh; }
+      aside { border-right: 1px solid #ddd; overflow: auto; padding: 8px; }
+      main { display: flex; flex-direction: column; }
+      .feed { flex: 1; overflow: auto; padding: 8px; }
+      .row { padding: 6px 8px; border-bottom: 1px solid #eee; }
+      form { display: flex; gap: 6px; padding: 8px; border-top: 1px solid #ddd; }
+      input { flex: 1; padding: 6px; }
+      .done { text-decoration: line-through; color: #888; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/index.tsx"></script>
+  </body>
+</html>

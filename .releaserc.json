@@ -1,0 +1,18 @@
+{
+  "branches": ["main"],
+  "tagFormat": "v${version}",
+  "plugins": [
+    "@semantic-release/commit-analyzer",
+    "@semantic-release/release-notes-generator",
+    ["@semantic-release/npm", { "pkgRoot": "packages/solid-pulse", "provenance": true }],
+    ["@semantic-release/npm", { "pkgRoot": "packages/scenario-sim", "provenance": true }],
+    ["@semantic-release/github", { "successComment": false, "failTitle": false }],
+    [
+      "@semantic-release/git",
+      {
+        "assets": ["packages/solid-pulse/package.json", "packages/scenario-sim/package.json"],
+        "message": "chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}"
+      }
+    ]
+  ]
+}
