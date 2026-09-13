@@ -50,6 +50,7 @@ export interface Pulse {
   bridge: BridgeClient | null;
   /** Run a command exactly as the CLI would. */
   run: PulseController["run"];
+  onDestroy(listener: () => void): () => void;
   destroy(): void;
 }
 
@@ -71,6 +72,8 @@ export function initPulse(options: PulseOptions = {}): Pulse {
   let dom: DomInstrumentation | null = null;
   let net: NetworkInstrumentation | null = null;
   let bridge: BridgeClient | null = null;
+  const destroyListeners = new Set<() => void>();
+  let destroyed = false;
 
   const bridgeFor = (opts: BridgeClientOptions) => {
     const client = new BridgeClient(controller, opts);
@@ -133,7 +136,12 @@ export function initPulse(options: PulseOptions = {}): Pulse {
       return bridge;
     },
     run: (name, args) => controller.run(name, args),
+    onDestroy(listener) { destroyListeners.add(listener); return () => { destroyListeners.delete(listener); }; },
     destroy() {
+      if (destroyed) return;
+      destroyed = true;
+      for (const listener of [...destroyListeners]) listener();
+      destroyListeners.clear();
       bridge?.disconnect();
       net?.dispose();
       dom?.dispose();

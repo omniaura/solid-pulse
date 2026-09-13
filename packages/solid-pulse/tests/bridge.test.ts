@@ -1,8 +1,24 @@
 import { describe, expect, test } from "bun:test";
 import WebSocket from "ws";
+import { BridgeClient } from "../src/bridge/client.js";
 import { startBridgeServer } from "../src/bridge/server.js";
+import { PulseController } from "../src/core/controller.js";
 
 const nativeFetch = (globalThis as unknown as { __nativeFetch: typeof fetch }).__nativeFetch;
+
+async function waitFor<T>(fn: () => Promise<T> | T, timeoutMs = 1000): Promise<T> {
+  const started = Date.now();
+  let last: unknown;
+  while (Date.now() - started < timeoutMs) {
+    try {
+      return await fn();
+    } catch (err) {
+      last = err;
+      await new Promise((r) => setTimeout(r, 20));
+    }
+  }
+  throw last instanceof Error ? last : new Error(String(last ?? "timed out"));
+}
 
 describe("bridge server", () => {
   test("ingests page events, relays commands, streams SSE, and stays loopback-only", async () => {
@@ -67,5 +83,82 @@ describe("bridge server", () => {
     await new Promise((r) => setTimeout(r, 20));
     expect((await api("/clients")).body as unknown as unknown[]).toHaveLength(0);
     await running.close();
+  });
+
+  test("BridgeClient publishes dynamic command registry updates without reconnecting or dropping pending commands", async () => {
+    const running = startBridgeServer({ port: 0, log: () => {}, commandTimeoutMs: 1000 });
+    const { url } = await running.ready;
+    const api = (route: string, init?: RequestInit) =>
+      nativeFetch(`${url}/api${route}`, init).then(async (r) => ({ status: r.status, body: (await r.json()) as Record<string, unknown> }));
+    const originalWebSocket = globalThis.WebSocket;
+    globalThis.WebSocket = WebSocket as unknown as typeof globalThis.WebSocket;
+
+    const controller = new PulseController();
+    let slowStarted!: () => void;
+    let releaseSlow!: () => void;
+    const slowStartedPromise = new Promise<void>((resolve) => {
+      slowStarted = resolve;
+    });
+    controller.register({ name: "slow.echo", summary: "Slow echo" }, async (args) => {
+      slowStarted();
+      await new Promise<void>((resolve) => {
+        releaseSlow = resolve;
+      });
+      return { marker: args.marker };
+    });
+
+    const client = new BridgeClient(controller, { url: url.replace(/^http/, "ws") + "/ws", clientId: "tab-dynamic", reconnectMs: 20 });
+    try {
+      client.connect();
+      const connected = await waitFor(async () => {
+        const clients = (await api("/clients")).body as unknown as Array<{ clientId: string; connectedWall: number; commands: number }>;
+        expect(clients).toHaveLength(1);
+        expect(clients[0]).toMatchObject({ clientId: "tab-dynamic" });
+        return clients[0]!;
+      });
+
+      const pending = api("/command", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: "slow.echo", args: { marker: "pending" } }),
+      });
+      await slowStartedPromise;
+
+      controller.register({ name: "dynamic.now", summary: "Late command", args: { value: "echo value" } }, (args) => ({ value: args.value ?? "ok" }));
+      const namesWithLate = await waitFor(async () => {
+        const commands = (await api("/commands")).body.commands as Array<{ name: string }>;
+        const names = commands.map((c) => c.name);
+        expect(names).toContain("dynamic.now");
+        return names;
+      });
+      expect(namesWithLate).toContain("slow.echo");
+      expect(((await api("/clients")).body as unknown as Array<{ connectedWall: number; commands: number }>)[0]).toMatchObject({
+        connectedWall: connected.connectedWall,
+        commands: namesWithLate.length,
+      });
+
+      const late = await api("/command", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: "dynamic.now", args: { value: "late" } }),
+      });
+      expect(late.body).toMatchObject({ ok: true, value: { value: "late" } });
+
+      controller.unregister("dynamic.now");
+      await waitFor(async () => {
+        const commands = (await api("/commands")).body.commands as Array<{ name: string }>;
+        const names = commands.map((c) => c.name);
+        expect(names).not.toContain("dynamic.now");
+        expect(((await api("/clients")).body as unknown as Array<{ commands: number }>)[0]!.commands).toBe(names.length);
+        return names;
+      });
+
+      releaseSlow();
+      await expect(pending).resolves.toMatchObject({ status: 200, body: { ok: true, value: { marker: "pending" } } });
+    } finally {
+      client.disconnect();
+      globalThis.WebSocket = originalWebSocket;
+      await running.close();
+    }
   });
 });

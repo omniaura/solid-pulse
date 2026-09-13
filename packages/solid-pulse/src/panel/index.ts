@@ -10,6 +10,13 @@ import type { Pulse } from "../index.js";
 import type { PulseEvent } from "../core/events.js";
 import { OWN_ATTR } from "../overlay/flash.js";
 import { FEATURES, type Feature } from "../core/controller.js";
+import { onTools, registeredTools } from './tools.js';
+import { discoverSolidGrab } from './grab.js';
+export { registerTool, type Devtool } from './tools.js';
+
+export type PanelCorner = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
+const CORNERS: PanelCorner[] = ['top-left', 'top-right', 'bottom-left', 'bottom-right'];
+const mountedPanels = new WeakMap<Pulse, () => void>();
 
 export interface PanelTab {
   id: string;
@@ -22,7 +29,13 @@ export interface PanelOptions {
   tabs?: PanelTab[];
   /** Start open (default false). Opening never moves focus. */
   open?: boolean;
-  position?: "bottom-left" | "bottom-right";
+  position?: PanelCorner;
+  /** Launcher clearance from viewport edges (for app bars), at least 12px. */
+  launcherInset?: { top?: number; bottom?: number; left?: number; right?: number };
+  /** Persist pinned/floating placement; false disables storage. */
+  storageKey?: string | false;
+  /** Optional live context (for example the active simulator scenario). */
+  statusLabel?: () => string;
   /** Max rows in the live list (default 150). */
   rows?: number;
   /**
@@ -54,20 +67,25 @@ function h<K extends keyof HTMLElementTagNameMap>(tag: K, attrs: Attrs = {}, ...
 const CSS = `
 [${OWN_ATTR}="panel-root"]{position:fixed;z-index:2147483647;font:12px/1.35 ui-monospace,SFMono-Regular,Menlo,monospace;color:#e5e7eb;pointer-events:none}
 [${OWN_ATTR}="panel-root"] *{box-sizing:border-box}
-.sp-fab{pointer-events:auto;position:fixed;bottom:12px;width:auto;padding:6px 10px;border-radius:999px;border:1px solid #f59e0b;background:rgba(17,24,39,.92);color:#fbbf24;cursor:pointer;font:inherit;box-shadow:0 4px 14px rgba(0,0,0,.35)}
+.sp-fab{pointer-events:auto;position:fixed;width:auto;max-width:calc(100vw - 24px);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:8px 12px;border-radius:8px;border:1px solid #f59e0b;background:#111827;color:#fbbf24;cursor:pointer;font:inherit}
+.sp-fab[hidden]{display:none}
 .sp-fab[data-rec="1"]{border-color:#ef4444;color:#fca5a5}
-.sp-drawer{pointer-events:auto;position:fixed;bottom:0;left:0;right:0;height:42vh;min-height:220px;background:rgba(17,24,39,.97);border-top:1px solid #374151;display:flex;flex-direction:column;box-shadow:0 -8px 30px rgba(0,0,0,.4)}
-.sp-head{display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid #374151}
+.sp-drawer{pointer-events:auto;position:fixed;width:min(640px,calc(100vw - 24px));height:min(520px,calc(100dvh - 24px));max-height:calc(100dvh - 24px);background:#111827;border:1px solid #4b5563;border-radius:10px;display:flex;flex-direction:column;overflow:hidden;color-scheme:dark}
+.sp-head{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:8px 10px;border-bottom:1px solid #374151;cursor:move;touch-action:none}
 .sp-head b{color:#fbbf24}
-.sp-tabs{display:flex;gap:2px}
+.sp-tabs{display:flex;gap:2px;overflow-x:auto;flex:0 0 100%;order:3;min-width:0}
 .sp-tab{background:transparent;border:1px solid transparent;color:#9ca3af;padding:3px 8px;border-radius:6px;cursor:pointer;font:inherit}
 .sp-tab[aria-selected="true"]{color:#fff;border-color:#4b5563;background:#1f2937}
-.sp-body{flex:1;overflow:auto;padding:8px 10px}
+.sp-body{flex:1;min-height:0;overflow:auto;padding:10px;overflow-wrap:anywhere}
 .sp-body[hidden]{display:none}
 .sp-row{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;margin-bottom:6px}
 .sp-btn{background:#1f2937;border:1px solid #4b5563;color:#e5e7eb;padding:3px 8px;border-radius:6px;cursor:pointer;font:inherit}
 .sp-btn:hover{border-color:#9ca3af}
-.sp-in{background:#111827;border:1px solid #4b5563;color:#e5e7eb;padding:3px 6px;border-radius:6px;font:inherit;min-width:120px}
+.sp-in{background:#111827;border:1px solid #4b5563;color:#e5e7eb;padding:5px 6px;border-radius:6px;font:inherit;min-width:100px;max-width:100%}
+.sp-in::placeholder{color:#9ca3af}
+.sp-head .sp-in{min-width:0}
+.sp-body pre{white-space:pre-wrap;overflow-wrap:anywhere}
+.sp-btn:focus-visible,.sp-tab:focus-visible,.sp-fab:focus-visible,.sp-in:focus-visible{outline:2px solid #fbbf24;outline-offset:2px}
 .sp-list{font-size:11px;white-space:pre-wrap;word-break:break-word}
 .sp-ev{padding:2px 4px;border-left:3px solid transparent;cursor:pointer}
 .sp-ev:hover{background:#1f2937}
@@ -75,7 +93,7 @@ const CSS = `
 .sp-ev[data-warn="1"]{background:rgba(239,68,68,.15)}
 .sp-ev pre{margin:4px 0 6px 10px;color:#9ca3af;max-height:220px;overflow:auto}
 .sp-dim{color:#9ca3af}
-.sp-status{margin-left:auto;display:flex;gap:8px;color:#9ca3af}
+.sp-status{display:flex;flex-wrap:wrap;gap:8px;color:#9ca3af;font-size:11px;flex:0 0 100%;order:4}
 .sp-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#6b7280;margin-right:4px}
 .sp-dot[data-on="1"]{background:#22c55e}
 `;
@@ -129,14 +147,58 @@ function oneLine(e: PulseEvent): string {
 }
 
 export function mountPanel(pulse: Pulse, options: PanelOptions = {}) {
+  mountedPanels.get(pulse)?.();
   const { controller } = pulse;
   const rows = options.rows ?? 150;
   const root = h("div", { [OWN_ATTR]: "panel-root" });
   const style = h("style");
   style.textContent = CSS;
   root.append(style);
-  const fab = h("button", { class: "sp-fab", type: "button", title: "solid-pulse panel (also: solid-pulse panel.toggle)", "data-command": "panel.toggle", onclick: () => void controller.run("panel.toggle") }, "◉ pulse");
-  fab.style[options.position === "bottom-right" ? "right" : "left"] = "12px";
+  const fab = h("button", { class: "sp-fab", type: "button", title: "Open developer tools (Alt+Shift+P)", 'aria-label': 'Open developer tools', "data-command": "panel.toggle", onclick: () => void controller.run("panel.toggle") }, "◉ Devtools");
+  const storageKey = options.storageKey === undefined ? 'solid-pulse:panel-corner' : options.storageKey;
+  let corner: PanelCorner = options.position ?? 'bottom-right';
+  try {
+    const stored = storageKey && localStorage.getItem(storageKey);
+    if (CORNERS.includes(stored as PanelCorner)) corner = stored as PanelCorner;
+  } catch { /* storage may be denied */ }
+  let floating: { x: number; y: number } | null = null;
+  try {
+    const stored = storageKey && localStorage.getItem(storageKey + ':floating');
+    const point = stored ? JSON.parse(stored) : null;
+    if (point && typeof point.x === 'number' && typeof point.y === 'number' && Number.isFinite(point.x) && Number.isFinite(point.y)) floating = { x: point.x, y: point.y };
+  } catch { /* invalid or unavailable storage */ }
+  function savePlacement() {
+    try {
+      if (!storageKey) return;
+      localStorage.setItem(storageKey, corner);
+      if (floating) localStorage.setItem(storageKey + ':floating', JSON.stringify(floating));
+      else localStorage.removeItem(storageKey + ':floating');
+    } catch { /* storage denied */ }
+  }
+  const pinSelect = h('select', { class: 'sp-in', 'aria-label': 'Pin panel to corner', 'data-command': 'panel.pin', onchange: (e) => void controller.run('panel.pin', { corner: (e.target as HTMLSelectElement).value }) });
+  pinSelect.append(h('option', { value: '', disabled: true }, 'Floating — pin to…'));
+  for (const c of CORNERS) pinSelect.append(h('option', { value: c }, 'Pin ' + c.replace('-', ' ')));
+  function place(el: HTMLElement, free = false) {
+    for (const edge of ['top', 'bottom', 'left', 'right'] as const) el.style[edge] = '';
+    if (free && floating) {
+      floating = {
+        x: Math.max(12, Math.min(floating.x, innerWidth - (el.offsetWidth || Math.min(640, innerWidth - 24)) - 12)),
+        y: Math.max(12, Math.min(floating.y, innerHeight - (el.offsetHeight || Math.min(520, innerHeight - 24)) - 12)),
+      };
+      el.style.left = floating.x + 'px';
+      el.style.top = floating.y + 'px';
+      savePlacement();
+    } else {
+      for (const edge of [corner.startsWith('top') ? 'top' : 'bottom', corner.endsWith('left') ? 'left' : 'right'] as const) {
+        const requested = el === fab ? options.launcherInset?.[edge] : undefined;
+        const inset = typeof requested === 'number' && Number.isFinite(requested) ? Math.max(12, requested) : 12;
+        el.style[edge] = 'max(' + inset + 'px, env(safe-area-inset-' + edge + '))';
+      }
+    }
+    el.dataset.corner = free && floating ? 'floating' : corner;
+  }
+  place(fab);
+  pinSelect.value = floating ? '' : corner;
   if (options.fab === false) fab.hidden = true;
   root.append(fab);
   const hotkey = options.hotkey === undefined ? "Alt+Shift+P" : options.hotkey;
@@ -153,6 +215,10 @@ export function mountPanel(pulse: Pulse, options: PanelOptions = {}) {
   const bodies = new Map<string, HTMLElement>();
   const tabButtons = new Map<string, HTMLButtonElement>();
   const cleanups: Array<() => void> = [];
+  const titles: Record<string, string> = { pulse: 'Pulse', query: 'Query', grab: 'Inspect', scenarios: 'Scenarios', record: 'Record' };
+  let tabs: HTMLDivElement | null = null;
+  let disposed = false;
+  const toolCleanups = new Map<string, () => void>();
 
   const run = (name: string, args: Record<string, unknown> = {}) => controller.run(name, args);
   const val = (r: Awaited<ReturnType<typeof run>>) => (r.ok ? r.value : { error: r.error });
@@ -295,6 +361,19 @@ export function mountPanel(pulse: Pulse, options: PanelOptions = {}) {
   const seedIn = h("input", { class: "sp-in", placeholder: "seed (optional)", "data-arg": "seed" });
   const stepIn = h("input", { class: "sp-in", placeholder: "step ms (default 1000)", "data-arg": "ms" });
   const scenStatus = h("pre", { class: "sp-dim" });
+  const latencyIn = h('input', { class: 'sp-in', type: 'number', min: '0', placeholder: 'Latency ms', 'aria-label': 'Latency milliseconds' });
+  const failIn = h('select', { class: 'sp-in', 'aria-label': 'Failure mode' });
+  for (const mode of ['off', 'data', 'all']) failIn.append(h('option', { value: mode }, mode === 'off' ? 'Failures off' : 'Fail ' + mode + ' requests'));
+  const faultRow = h('div', { class: 'sp-row' }, latencyIn, failIn,
+    h('button', { class: 'sp-btn', type: 'button', 'data-command': 'scenario.faults', onclick: () => {
+      void run('scenario.faults', { latencyMs: latencyIn.value ? Number(latencyIn.value) : undefined, failMode: failIn.value }).then(r => {
+        if (!r.ok) showResult(scenBody, { error: r.error }); else void refreshScenario();
+      });
+    } }, 'Apply faults'));
+  const advanced = h('details');
+  advanced.append(h('summary', {}, 'All simulator commands'));
+  const commandForms = h('div');
+  advanced.append(commandForms);
   scenBody.append(
     h("div", { class: "sp-row" },
       h("span", {}, "scenario"), scenSelect, seedIn,
@@ -307,7 +386,7 @@ export function mountPanel(pulse: Pulse, options: PanelOptions = {}) {
       h("button", { class: "sp-btn", type: "button", "data-command": "scenario.streams", onclick: () => void run("scenario.streams").then((r) => showResult(scenBody, r.ok ? r.value : r.error)) }, "Streams"),
       h("button", { class: "sp-btn", type: "button", "data-command": "scenario.list", onclick: () => void refreshScenario() }, "Reload list"),
     ),
-    scenStatus,
+    faultRow, advanced, scenStatus,
   );
   bodies.set("scenarios", scenBody);
 
@@ -318,6 +397,11 @@ export function mountPanel(pulse: Pulse, options: PanelOptions = {}) {
     }
     const listRes = await run("scenario.list");
     const status = await run("scenario.status");
+    if (disposed) return;
+    if (status.ok) {
+      const faults = (status.value as { faults?: { latencyMs?: number; failMode?: string } }).faults;
+      if (faults) { latencyIn.value = String(faults.latencyMs ?? 0); failIn.value = faults.failMode ?? 'off'; }
+    }
     if (listRes.ok) {
       const scenarios = listRes.value as Array<{ name: string; label?: string }>;
       const current = status.ok ? (status.value as { scenario?: string }).scenario : undefined;
@@ -366,6 +450,8 @@ export function mountPanel(pulse: Pulse, options: PanelOptions = {}) {
   }
 
   for (const tab of options.tabs ?? []) {
+    if (bodies.has(tab.id)) throw new Error('Duplicate tab: ' + tab.id);
+    titles[tab.id] = tab.title;
     const body = h("div", { class: "sp-body" });
     const cleanup = tab.mount(body, pulse);
     if (cleanup) cleanups.push(cleanup);
@@ -377,37 +463,64 @@ export function mountPanel(pulse: Pulse, options: PanelOptions = {}) {
   const recDot = h("span", { class: "sp-dot" });
   const statusText = h("span", { "data-command": "panel.status" });
   function refreshStatus() {
+    const label = options.statusLabel?.();
+    fab.textContent = '◉ Devtools' + (label ? ' · ' + label : '');
+    fab.setAttribute('aria-label', 'Open developer tools' + (label ? ': ' + label : ''));
     bridgeDot.dataset.on = pulse.bridge?.connected ? "1" : "0";
     recDot.dataset.on = controller.bus.currentRecording() ? "1" : "0";
     fab.dataset.rec = controller.bus.currentRecording() ? "1" : "0";
     pauseBtn.textContent = controller.bus.paused ? "Resume" : "Pause";
     statusText.textContent = `${controller.bus.buffer.size}/${controller.bus.buffer.capacity} buffered · ${controller.bus.buffer.dropped} dropped${pulse.bridge ? ` · ${pulse.bridge.clientId}` : ""}`;
   }
-  const statusTimer = setInterval(() => open && refreshStatus(), 1000);
+  const statusTimer = setInterval(refreshStatus, 1000);
   cleanups.push(() => clearInterval(statusTimer));
 
   function buildDrawer() {
-    const tabs = h("div", { class: "sp-tabs", role: "tablist" });
-    const titles: Record<string, string> = { pulse: "Pulse", query: "Query", grab: "Grab", scenarios: "Scenarios", record: "Record" };
-    for (const t of options.tabs ?? []) titles[t.id] = t.title;
+    tabs = h("div", { class: "sp-tabs", role: "tablist", 'aria-label': 'Developer tools' });
+    renderTabs();
+    const head = h("div", { class: "sp-head" },
+      h("b", {}, "◉ Devtools"),
+      pinSelect,
+      h("button", { class: "sp-btn", type: "button", 'aria-label': 'Close developer tools', "data-command": "panel.close", onclick: () => void run("panel.close") }, "✕"),
+      tabs,
+      h("span", { class: "sp-status" }, h("span", {}, bridgeDot, "bridge"), h("span", {}, recDot, "rec"), statusText),
+    );
+    const d = h("div", { class: "sp-drawer", role: "region", "aria-label": "solid-pulse" }, head, ...bodies.values());
+    let drag: { x: number; y: number; left: number; top: number } | null = null;
+    head.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0 || (e.target as Element).closest('button,select,input')) return;
+      const rect = d.getBoundingClientRect();
+      drag = { x: e.clientX, y: e.clientY, left: rect.left, top: rect.top };
+      head.setPointerCapture(e.pointerId);
+      e.preventDefault();
+    });
+    head.addEventListener('pointermove', (e) => {
+      if (!drag) return;
+      void run('panel.move', { x: drag.left + e.clientX - drag.x, y: drag.top + e.clientY - drag.y });
+    });
+    for (const event of ['pointerup', 'pointercancel', 'lostpointercapture']) head.addEventListener(event, () => { drag = null; });
+    return d;
+  }
+
+  function available(id: string) {
+    return id === 'query' ? controller.has('inspect.queries') : id === 'scenarios' ? controller.has('scenario.list') : true;
+  }
+  function renderTabs() {
+    if (!tabs) return;
+    tabs.replaceChildren();
+    tabButtons.clear();
     for (const [id, body] of bodies) {
+      if (!available(id)) { body.hidden = true; continue; }
       const btn = h("button", { class: "sp-tab", type: "button", role: "tab", "data-command": "panel.tab", "data-tab": id, onclick: () => void run("panel.tab", { name: id }) }, titles[id] ?? id);
+      btn.setAttribute('aria-selected', String(id === activeTab));
       tabButtons.set(id, btn);
       tabs.append(btn);
       body.hidden = id !== activeTab;
     }
-    const head = h("div", { class: "sp-head" },
-      h("b", {}, "◉ solid-pulse"),
-      tabs,
-      h("span", { class: "sp-status" }, h("span", {}, bridgeDot, "bridge"), h("span", {}, recDot, "rec"), statusText),
-      h("button", { class: "sp-btn", type: "button", "data-command": "panel.close", onclick: () => void run("panel.close") }, "✕"),
-    );
-    const d = h("div", { class: "sp-drawer", role: "region", "aria-label": "solid-pulse" }, head, ...bodies.values());
-    return d;
   }
 
   function setTab(id: string) {
-    if (!bodies.has(id)) throw new Error(`unknown tab: ${id} (${[...bodies.keys()].join(", ")})`);
+    if (!bodies.has(id) || !available(id)) throw new Error(`unknown tab: ${id} (${[...bodies.keys()].filter(available).join(", ")})`);
     activeTab = id;
     for (const [tid, body] of bodies) body.hidden = tid !== id;
     for (const [tid, btn] of tabButtons) btn.setAttribute("aria-selected", tid === id ? "true" : "false");
@@ -423,6 +536,7 @@ export function mountPanel(pulse: Pulse, options: PanelOptions = {}) {
     if (open) {
       drawer ??= buildDrawer();
       root.append(drawer);
+      place(drawer, true);
       fab.hidden = true;
       setTab(activeTab);
       refreshStatus();
@@ -450,21 +564,107 @@ export function mountPanel(pulse: Pulse, options: PanelOptions = {}) {
     setTab(String(a.name ?? "pulse"));
     return { open, tab: activeTab };
   });
-  controller.register({ name: "panel.status", summary: "Is the panel open, which tab, which tabs exist.", ui: "panel header" }, () => ({ open, tab: activeTab, tabs: [...bodies.keys()] }));
+  controller.register({ name: "panel.status", summary: "Panel visibility, available tools and floating/pinned placement.", ui: "panel header" }, () => ({ open, tab: activeTab, tabs: [...bodies.keys()].filter(available), corner, floating }));
+  controller.register({ name: 'panel.pin', summary: 'Pin panel and launcher to a viewport corner.', args: { corner: CORNERS.join('|') }, ui: 'panel corner selector' }, (a) => {
+    if (!CORNERS.includes(a.corner as PanelCorner)) throw new Error('Invalid corner');
+    corner = a.corner as PanelCorner;
+    floating = null;
+    pinSelect.value = corner;
+    place(fab);
+    if (drawer) place(drawer);
+    savePlacement();
+    return { corner };
+  });
+  controller.register({ name: 'panel.move', summary: 'Float the panel at viewport coordinates.', args: { x: 'pixels', y: 'pixels' } }, (a) => {
+    if (typeof a.x !== 'number' || typeof a.y !== 'number' || !Number.isFinite(a.x) || !Number.isFinite(a.y)) throw new Error('Finite x/y required');
+    floating = { x: a.x, y: a.y };
+    pinSelect.value = '';
+    setOpen(true);
+    place(drawer!, true);
+    return { floating };
+  });
+  const resize = () => { place(fab); if (drawer && open) place(drawer, true); };
+  window.addEventListener('resize', resize);
+  cleanups.push(() => window.removeEventListener('resize', resize));
+  function syncTools() {
+    const tools = registeredTools(pulse);
+    for (const [id, cleanup] of toolCleanups) {
+      if (tools.some(t => t.id === id)) continue;
+      cleanup();
+      toolCleanups.delete(id);
+      bodies.get(id)?.remove();
+      bodies.delete(id);
+    }
+    for (const tool of tools) {
+      if (toolCleanups.has(tool.id)) continue;
+      const body = h('div', { class: 'sp-body' });
+      let cleanup: void | (() => void) = undefined;
+      try { cleanup = tool.mount(body, pulse); }
+      catch (error) { body.textContent = tool.title + ' could not mount: ' + String(error); }
+      toolCleanups.set(tool.id, cleanup ?? (() => {}));
+      titles[tool.id] = tool.title;
+      bodies.set(tool.id, body);
+      body.hidden = tool.id !== activeTab;
+      drawer?.append(body);
+    }
+    if (!bodies.has(activeTab) || !available(activeTab)) activeTab = 'pulse';
+    queryBody.hidden = activeTab !== 'query' || !available('query');
+    scenBody.hidden = activeTab !== 'scenarios' || !available('scenarios');
+    if (controller.has('scenario.faults')) {
+      if (!faultRow.isConnected) scenBody.insertBefore(faultRow, advanced);
+    } else faultRow.remove();
+    const existing = new Set([...commandForms.children].map(el => (el as HTMLElement).dataset.name));
+    for (const spec of controller.describe().filter(s => s.name.startsWith('scenario.'))) {
+      if (existing.has(spec.name)) continue;
+      const fields = new Map<string, HTMLInputElement>();
+      const form = h('form', { 'data-name': spec.name });
+      form.append(h('p', {}, spec.summary));
+      for (const [key, description] of Object.entries(spec.args ?? {})) {
+        const input = h('input', { class: 'sp-in', placeholder: description, 'aria-label': spec.name + ' ' + key });
+        fields.set(key, input);
+        form.append(h('label', {}, key + ' ', input));
+      }
+      const output = h('pre', { 'aria-live': 'polite' });
+      form.append(h('button', { class: 'sp-btn', type: 'submit', 'data-command': spec.name }, spec.name), output);
+      form.addEventListener('submit', e => {
+        e.preventDefault();
+        const args: Record<string, unknown> = {};
+        for (const [key, input] of fields) if (input.value !== '') {
+          try { args[key] = JSON.parse(input.value); } catch { args[key] = input.value; }
+        }
+        void run(spec.name, args).then(r => { output.textContent = JSON.stringify(r.ok ? r.value : { error: r.error }, null, 2); });
+      });
+      commandForms.append(form);
+    }
+    for (const el of [...commandForms.children]) if (!controller.has((el as HTMLElement).dataset.name!)) el.remove();
+    renderTabs();
+  }
+  cleanups.push(onTools(pulse, syncTools));
+  cleanups.push(controller.onCommands(() => queueMicrotask(() => { if (!disposed) syncTools(); })));
+  syncTools();
+  cleanups.push(discoverSolidGrab(pulse));
 
   (document.body ?? document.documentElement).append(root);
+  refreshStatus();
   if (options.open) setOpen(true);
 
-  return {
+  const panel = {
     root,
     querySlot,
     open: () => setOpen(true),
     close: () => setOpen(false),
     destroy() {
+      if (disposed) return;
+      disposed = true;
       if (hotkey) document.removeEventListener("keydown", onKey, true);
       for (const c of cleanups) c();
-      for (const n of ["panel.open", "panel.close", "panel.toggle", "panel.tab", "panel.status"]) controller.unregister(n);
+      for (const cleanup of toolCleanups.values()) cleanup();
+      for (const n of ["panel.open", "panel.close", "panel.toggle", "panel.tab", "panel.status", 'panel.pin', 'panel.move']) controller.unregister(n);
       root.remove();
+      mountedPanels.delete(pulse);
     },
   };
+  mountedPanels.set(pulse, panel.destroy);
+  cleanups.push(pulse.onDestroy(panel.destroy));
+  return panel;
 }

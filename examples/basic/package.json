@@ -13,7 +13,7 @@
   },
   "devDependencies": {
     "@omniaura/scenario-sim": "^0.1.0",
-    "@omniaura/solid-pulse": "file:../../packages/solid-pulse",
+    "@omniaura/solid-pulse": "workspace:*",
     "vite": "^7.0.0",
     "vite-plugin-solid": "^2.11.0"
   }

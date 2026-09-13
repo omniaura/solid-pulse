@@ -41,6 +41,7 @@ export class BridgeClient {
   private queue: PulseEvent[] = [];
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
   private unsubscribe: (() => void) | null = null;
+  private unsubscribeCommands: (() => void) | null = null;
   private closed = false;
   private attempts = 0;
   private NativeWebSocket: typeof WebSocket;
@@ -64,6 +65,8 @@ export class BridgeClient {
       ws.onopen = () => {
         this.connected = true;
         this.attempts = 0;
+        this.unsubscribeCommands?.();
+        this.unsubscribeCommands = this.controller.onCommands(() => this.sendCommands());
         const hello: HelloFrame = {
           type: "hello",
           protocol: PROTOCOL_VERSION,
@@ -91,6 +94,8 @@ export class BridgeClient {
         this.ws = null;
         this.unsubscribe?.();
         this.unsubscribe = null;
+        this.unsubscribeCommands?.();
+        this.unsubscribeCommands = null;
         if (!this.closed) this.timer = setTimeout(() => this.connect(), this.nextDelay());
       };
       ws.onerror = () => ws.close();
@@ -110,6 +115,9 @@ export class BridgeClient {
     if (this.timer) clearTimeout(this.timer);
     if (this.flushTimer) clearTimeout(this.flushTimer);
     this.unsubscribe?.();
+    this.unsubscribe = null;
+    this.unsubscribeCommands?.();
+    this.unsubscribeCommands = null;
     this.ws?.close();
     this.ws = null;
     this.connected = false;
@@ -135,6 +143,10 @@ export class BridgeClient {
   private send(frame: PageFrame) {
     if (!this.ws || this.ws.readyState !== this.NativeWebSocket.OPEN) return;
     this.ws.send(JSON.stringify(frame));
+  }
+
+  private sendCommands() {
+    this.send({ type: "commands", commands: this.controller.describe() });
   }
 
   private async onMessage(raw: unknown) {
