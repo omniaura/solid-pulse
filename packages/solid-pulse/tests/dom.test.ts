@@ -50,9 +50,13 @@ describe("DOM observation", () => {
     expect(summary[0]).toMatchObject({ id: "app", types: ["attributes"], attrs: ["data-x"], component: "App" });
     expect(muts[0]!.data.attributedTo).toBe("outside-solid-flush");
 
-    // our own overlay never produces events
+    // our own overlay never produces events: it renders inside a shadow root,
+    // so the document-level observer (ours or the page's) cannot see its nodes
     bus.clear();
-    overlay.flash([{ x: 0, y: 0, w: 10, h: 10 }], "dom");
+    expect(overlay.flash([{ x: 0, y: 0, w: 10, h: 10 }], "dom")).toBe(1);
+    expect(overlay.liveNodes).toBe(1);
+    expect(document.querySelector('[data-solid-pulse="rect"]')).toBeNull(); // not in the light DOM
+    expect(document.querySelector('[data-solid-pulse="overlay"]')?.shadowRoot?.querySelector('[data-solid-pulse="rect"]')).not.toBeNull();
     await flushMO();
     expect(bus.list({ limit: 50 }).filter((e) => e.kind === "dom.mutation").length).toBe(0);
 
