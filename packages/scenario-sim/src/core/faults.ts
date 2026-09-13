@@ -2,7 +2,7 @@
  * Fault layer: latency (+ seeded jitter), fail modes and per-endpoint
  * overrides. Overrides are checked before routing, so a test can force any
  * endpoint — even one the scenario never defined — to answer with a given
- * status/body, once (`times`) or until cleared. This is the ditto-app
+ * status/body, once (`times`) or until cleared. This generalises the classic in-bundle mock pattern:
  * `setEndpointOverride` contract, generalised.
  */
 

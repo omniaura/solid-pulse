@@ -100,7 +100,7 @@ describe("network instrumentation", () => {
 
     // WebSocket lifecycle with type extraction and out/in counting
     bus.clear();
-    const ws = new WebSocket("ws://localhost:3000/api/v5/agents/chat/ws?ticket=abc&sinceEventID=9", ["ditto-agent-chat"]) as unknown as FakeWS;
+    const ws = new WebSocket("ws://localhost:3000/api/v5/agents/chat/ws?ticket=abc&sinceEventID=9", ["chat-v1"]) as unknown as FakeWS;
     await new Promise((r) => setTimeout(r, 0));
     (ws as unknown as WebSocket).send(JSON.stringify({ type: "subscribe", topic: "user:1" }));
     ws.dispatchEvent(Object.assign(new MessageEvent("message", { data: JSON.stringify({ type: "ready", topic: "user:1" }) })));
@@ -108,7 +108,7 @@ describe("network instrumentation", () => {
     ws.close(1006, "gone");
     events = bus.list({ limit: 50 });
     expect(events.map((e) => e.kind)).toEqual(["net.ws.open", "net.ws.open", "net.ws.message", "net.ws.message", "net.ws.message", "net.ws.close"]);
-    expect(events[0]!.data).toMatchObject({ url: `ws://localhost:3000/api/v5/agents/chat/ws?ticket=${encodeURIComponent(REDACTED)}&sinceEventID=9`, protocols: ["ditto-agent-chat"], state: "connecting" });
+    expect(events[0]!.data).toMatchObject({ url: `ws://localhost:3000/api/v5/agents/chat/ws?ticket=${encodeURIComponent(REDACTED)}&sinceEventID=9`, protocols: ["chat-v1"], state: "connecting" });
     expect(events[2]!.data).toMatchObject({ dir: "out", type: "subscribe" });
     expect(events[3]!.data).toMatchObject({ dir: "in", type: "ready", n: 1 });
     expect(events[5]!.data).toMatchObject({ code: 1006, reason: "gone", inbound: 2, outbound: 1 });

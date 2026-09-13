@@ -59,7 +59,7 @@ export function empty(status = 204, init: ResponseInit = {}): Response {
   return new Response(null, { ...init, status });
 }
 
-/** RFC 9457 problem details, the shape most APIs (and Ditto) use for errors. */
+/** RFC 9457 problem details, the shape most APIs use for errors. */
 export function problem(status: number, detail: string, extra: Record<string, unknown> = {}): Response {
   return json({ type: "about:blank", title: statusText(status), status, detail, ...extra }, { status, headers: { "content-type": "application/problem+json" } });
 }
