@@ -28,5 +28,5 @@ curl -sf http://localhost:5199/__sim/state?collection=notes | grep -q '"smoke"' 
 curl -sf http://localhost:5199/ | grep -q '/@solid-pulse/init' && echo "ok: dev HTML injects the pulse runtime first"
 # CLI discovery via node_modules/.vite/solid-pulse.json written by the plugin
 (cd "$root/examples/basic" && node "$root/packages/solid-pulse/dist/cli.js" status --json | grep -q '"tool"') && echo "ok: solid-pulse CLI auto-discovered the bridge"
-node "$root/packages/scenario-sim/dist/cli.js" status --url http://localhost:5199/__sim --json | grep -q '"scenario"' && echo "ok: scenario-sim CLI reached /__sim"
+"$root/examples/basic/node_modules/.bin/scenario-sim" status --url http://localhost:5199/__sim --json | grep -q '"scenario"' && echo "ok: published scenario-sim CLI reached /__sim"
 echo "smoke passed"
