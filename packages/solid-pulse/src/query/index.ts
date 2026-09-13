@@ -19,10 +19,51 @@
  * at it. The overlay badge is centred on the component's DOM when known.
  */
 
-import type { QueryCacheNotifyEvent, QueryClient, QueryObserver } from "@tanstack/query-core";
 import type { Pulse } from "../index.js";
 import type { ComponentRef } from "../core/events.js";
 import { redactValue } from "../core/redact.js";
+
+/*
+ * Structural views of TanStack Query's client/cache/query/observer. Typed this
+ * way (instead of importing the classes) so an app's own @tanstack/query-core
+ * 5.x — any patch level, with its nominal `#private` fields — is accepted
+ * without a version-for-version match with ours.
+ */
+export interface QueryStateLike {
+  status: string;
+  fetchStatus: string;
+  data: unknown;
+  dataUpdatedAt: number;
+  isInvalidated: boolean;
+  errorUpdateCount: number;
+}
+export interface QueryObserverLike {
+  options: { staleTime?: unknown; enabled?: unknown };
+}
+export interface QueryLike {
+  queryKey: readonly unknown[];
+  queryHash: string;
+  state: QueryStateLike;
+  observers: QueryObserverLike[];
+  getObserversCount(): number;
+}
+export interface QueryCacheNotifyEventLike {
+  type: string;
+  query: QueryLike;
+  observer?: QueryObserverLike;
+  action?: { type: string; error?: unknown; manual?: boolean };
+}
+export interface MutationCacheNotifyEventLike {
+  type: string;
+  mutation?: { mutationId: number; options: { mutationKey?: readonly unknown[] } };
+  action?: { type: string; error?: unknown };
+}
+export interface QueryClientLike {
+  getQueryCache(): { subscribe(listener: (event: QueryCacheNotifyEventLike) => void): () => void; getAll(): QueryLike[] };
+  getMutationCache(): { subscribe(listener: (event: MutationCacheNotifyEventLike) => void): () => void };
+  invalidateQueries(filters?: { queryKey?: readonly unknown[]; exact?: boolean }): Promise<unknown>;
+  resetQueries(filters?: { queryKey?: readonly unknown[] }): Promise<unknown>;
+}
 
 export interface QueryAdapterOptions {
   /** Badge duration in ms (default 1200). */
@@ -40,9 +81,9 @@ function keyLabel(key: readonly unknown[]): string {
   }
 }
 
-export function attachQueryClient(pulse: Pulse, client: QueryClient, options: QueryAdapterOptions = {}): () => void {
+export function attachQueryClient(pulse: Pulse, client: QueryClientLike, options: QueryAdapterOptions = {}): () => void {
   const { controller, bus, overlay } = pulse;
-  const observers = new WeakMap<QueryObserver, ComponentRef | null>();
+  const observers = new WeakMap<QueryObserverLike, ComponentRef | null>();
   const fetchStarts = new Map<string, number>();
   // The fetch an observer's mount triggers is dispatched synchronously, right
   // after `observerAdded`, so the initiator is only valid for the current tick.
@@ -55,7 +96,7 @@ export function attachQueryClient(pulse: Pulse, client: QueryClient, options: Qu
     if (rect && controller.isOn("flash")) overlay.flash([rect], "query", { ms: 700 });
   };
 
-  const onQuery = (e: QueryCacheNotifyEvent) => {
+  const onQuery = (e: QueryCacheNotifyEventLike) => {
     if (!controller.isOn("query")) return;
     const q = e.query;
     const key = q.queryKey as readonly unknown[];
@@ -69,6 +110,7 @@ export function attachQueryClient(pulse: Pulse, client: QueryClient, options: Qu
         bus.emit("query.removed", { hash, key: redactValue(key), label });
         break;
       case "observerAdded": {
+        if (!e.observer) break;
         const component = pulse.solid?.currentComponent() ?? null;
         observers.set(e.observer, component);
         const count = q.getObserversCount();
@@ -88,13 +130,15 @@ export function attachQueryClient(pulse: Pulse, client: QueryClient, options: Qu
         break;
       }
       case "observerRemoved": {
+        if (!e.observer) break;
         const component = observers.get(e.observer) ?? null;
         observers.delete(e.observer);
         bus.emit("query.unobserve", { hash, key: redactValue(key), label, observers: q.getObserversCount() }, { component });
         break;
       }
       case "updated": {
-        const action = e.action as { type: string; error?: unknown; meta?: unknown; manual?: boolean };
+        if (!e.action) break;
+        const action = e.action;
         if (action.type === "fetch") {
           fetchStarts.set(hash, performance.now());
           const recent = pendingInitiator && pendingInitiator.hash === hash ? pendingInitiator : null;
@@ -130,8 +174,8 @@ export function attachQueryClient(pulse: Pulse, client: QueryClient, options: Qu
   const unsubQuery = client.getQueryCache().subscribe(onQuery);
   const unsubMutation = client.getMutationCache().subscribe((e) => {
     if (!controller.isOn("query")) return;
-    if (e.type !== "updated") return;
-    const action = e.action as { type: string; error?: unknown };
+    if (e.type !== "updated" || !e.action || !e.mutation) return;
+    const action = e.action;
     const key = e.mutation.options.mutationKey ?? null;
     const data = { id: e.mutation.mutationId, key: redactValue(key), label: key ? keyLabel(key as readonly unknown[]) : null };
     if (action.type === "pending") bus.emit("mutation.start", data);
@@ -162,7 +206,7 @@ export function attachQueryClient(pulse: Pulse, client: QueryClient, options: Qu
           status: q.state.status,
           fetchStatus: q.state.fetchStatus,
           observers: q.getObserversCount(),
-          components: q.observers.map((o) => observers.get(o as QueryObserver)?.name ?? null),
+          components: q.observers.map((o) => observers.get(o)?.name ?? null),
           dataAgeMs: q.state.dataUpdatedAt ? Date.now() - q.state.dataUpdatedAt : null,
           isInvalidated: q.state.isInvalidated,
           errorUpdateCount: q.state.errorUpdateCount,
