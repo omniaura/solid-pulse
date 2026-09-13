@@ -89,11 +89,18 @@ export function attachQueryClient(pulse: Pulse, client: QueryClientLike, options
   // after `observerAdded`, so the initiator is only valid for the current tick.
   let pendingInitiator: { hash: string; component: ComponentRef | null } | null = null;
 
+  // Cache notifications fire synchronously inside the app's reactive scope;
+  // measuring there forces layout mid-update. Defer the (single) rect read to
+  // the next animation frame — the badge is a visual, a frame late is fine.
   const badge = (title: string, body: string, component: ComponentRef | null) => {
     if (!overlay || !controller.isOn("queryOverlay")) return;
-    const rect = component && pulse.solid ? pulse.solid.rectFor(component) : null;
-    overlay.badge({ title, body }, rect, { ms: options.badgeMs ?? 1200, kind: "query" });
-    if (rect && controller.isOn("flash")) overlay.flash([rect], "query", { ms: 700 });
+    const run = () => {
+      const rect = component && pulse.solid ? pulse.solid.rectFor(component) : null;
+      overlay.badge({ title, body }, rect, { ms: options.badgeMs ?? 1200, kind: "query" });
+      if (rect && controller.isOn("flash")) overlay.flash([rect], "query", { ms: 700 });
+    };
+    if (typeof requestAnimationFrame === "function") requestAnimationFrame(run);
+    else setTimeout(run, 16);
   };
 
   const onQuery = (e: QueryCacheNotifyEventLike) => {

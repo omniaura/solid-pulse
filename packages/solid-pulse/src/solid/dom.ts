@@ -206,16 +206,20 @@ export function installDom(controller: PulseController, solid: SolidInstrumentat
     pruneDetached(t);
 
     if (targets.size > 0) {
+      // Never measure inside the observer callback: a forced layout here (a
+      // microtask between frames) can feed a positioning library's
+      // ResizeObserver/autoUpdate loop and keep the page's own elements moving.
+      // Rects for flashing are read once, in the next animation frame.
       const wantRects = Boolean(overlay && controller.isOn("flash"));
-      const rects: Rect[] = [];
+      const flashTargets: Element[] = [];
       const summary: Array<ElementRef & { types: string[]; attrs?: string[]; added?: number; removed?: number }> = [];
       let attributed: ComponentRef | null = null;
       let i = 0;
       for (const [el, info] of targets) {
-        if (wantRects || i < MAX_TARGETS_IN_EVENT) {
-          const desc = describeElement(el, wantRects);
-          if (wantRects && desc.rect && el.isConnected) rects.push(desc.rect);
-          if (i < MAX_TARGETS_IN_EVENT) {
+        if (wantRects && flashTargets.length < MAX_TARGETS_IN_EVENT) flashTargets.push(el);
+        if (i < MAX_TARGETS_IN_EVENT) {
+          const desc = describeElement(el, false);
+          {
             summary.push({
               ...desc,
               types: [...info.types],
@@ -240,7 +244,18 @@ export function installDom(controller: PulseController, solid: SolidInstrumentat
         },
         { flush, component: attributed },
       );
-      if (wantRects && rects.length) overlay!.flash(rects, "dom", { label: attributed?.name });
+      if (wantRects && flashTargets.length) {
+        const label = attributed?.name;
+        nextFrame(() => {
+          const rects: Rect[] = [];
+          for (const el of flashTargets) {
+            if (!el.isConnected) continue;
+            const r = el.getBoundingClientRect();
+            if (r.width > 0 && r.height > 0) rects.push({ x: r.left, y: r.top, w: r.width, h: r.height });
+          }
+          if (rects.length) overlay!.flash(rects, "dom", { label });
+        });
+      }
     }
 
     for (const rec of detachedNow) {
