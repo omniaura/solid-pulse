@@ -27,12 +27,14 @@ export interface PanelTab {
 
 export interface PanelOptions {
   tabs?: PanelTab[];
+  /** Native query devtools mounted inside Query, alongside the agent command controls. */
+  queryDevtools?: PanelTab;
   /** Start open (default false). Opening never moves focus. */
   open?: boolean;
   position?: PanelCorner;
   /** Launcher clearance from viewport edges (for app bars), at least 12px. */
   launcherInset?: { top?: number; bottom?: number; left?: number; right?: number };
-  /** Persist pinned/floating placement; false disables storage. */
+  /** Persist placement, open state and selected tab; false disables storage. */
   storageKey?: string | false;
   /** Optional live context (for example the active simulator scenario). */
   statusLabel?: () => string;
@@ -213,6 +215,15 @@ export function mountPanel(pulse: Pulse, options: PanelOptions = {}) {
   let open = false;
   let drawer: HTMLDivElement | null = null;
   let activeTab = "pulse";
+  let savedView: { open?: boolean; tab?: string } = {};
+  try {
+    const value = storageKey && JSON.parse(localStorage.getItem(storageKey + ':view') ?? 'null');
+    if (value?.version === 1) savedView = { open: typeof value.open === 'boolean' ? value.open : undefined, tab: typeof value.tab === 'string' ? value.tab : undefined };
+  } catch { /* Storage is optional. */ }
+  function saveView() {
+    try { if (storageKey) localStorage.setItem(storageKey + ':view', JSON.stringify({ version: 1, open, tab: savedView.tab ?? activeTab })); }
+    catch { /* Storage denied. */ }
+  }
   const bodies = new Map<string, HTMLElement>();
   const tabButtons = new Map<string, HTMLButtonElement>();
   const cleanups: Array<() => void> = [];
@@ -220,6 +231,7 @@ export function mountPanel(pulse: Pulse, options: PanelOptions = {}) {
   let tabs: HTMLDivElement | null = null;
   let disposed = false;
   const toolCleanups = new Map<string, () => void>();
+  const toolBodies = new Map<string, HTMLElement>();
 
   const run = (name: string, args: Record<string, unknown> = {}) => controller.run(name, args);
   const val = (r: Awaited<ReturnType<typeof run>>) => (r.ok ? r.value : { error: r.error });
@@ -237,6 +249,9 @@ export function mountPanel(pulse: Pulse, options: PanelOptions = {}) {
   const kindsIn = h("input", { class: "sp-in", placeholder: "kinds: dom,query,net.ws.*", "data-command": "filters.set", "data-arg": "kinds", onchange: (e) => void run("filters.set", { kinds: (e.target as HTMLInputElement).value }) });
   const compIn = h("input", { class: "sp-in", placeholder: "component contains…", "data-command": "filters.set", "data-arg": "component", onchange: (e) => void run("filters.set", { component: (e.target as HTMLInputElement).value }) });
   const textIn = h("input", { class: "sp-in", placeholder: "text contains…", "data-command": "filters.set", "data-arg": "text", onchange: (e) => void run("filters.set", { text: (e.target as HTMLInputElement).value }) });
+  kindsIn.value = controller.filters.kinds.join(',');
+  compIn.value = controller.filters.component;
+  textIn.value = controller.filters.text;
   const pauseBtn = h("button", { class: "sp-btn", type: "button", "data-command": "events.pause", onclick: () => void run(controller.bus.paused ? "events.resume" : "events.pause").then(refreshStatus) }, "Pause");
   const list = h("div", { class: "sp-list" });
   pulseBody.append(
@@ -327,32 +342,46 @@ export function mountPanel(pulse: Pulse, options: PanelOptions = {}) {
     querySlot,
   );
   bodies.set("query", queryBody);
+  let queryMounted = false;
 
   // ── Grab tab ─────────────────────────────────────────────────────
   const grabBody = h("div", { class: "sp-body" });
   const selIn = h("input", { class: "sp-in", placeholder: "CSS selector", "data-arg": "selector" });
-  const hasGrab = Boolean((window as unknown as { __SOLID_GRAB__?: unknown }).__SOLID_GRAB__);
+  const inspectSlot = h('div', { 'data-slot': 'inspect-tools' });
+  const fallbackPicker = h("button", { class: "sp-btn", type: "button", "data-command": "inspect.element", onclick: () => pickElement() }, "Pick element (click)");
   grabBody.append(
     h("div", { class: "sp-row" },
-      h("button", { class: "sp-btn", type: "button", "data-command": "inspect.element", onclick: () => pickElement() }, "Pick element (click)"),
+      fallbackPicker,
       selIn,
       h("button", { class: "sp-btn", type: "button", "data-command": "inspect.element", "data-arg": "selector", onclick: () => void run("inspect.element", { selector: selIn.value }).then((r) => showResult(grabBody, r.ok ? r.value : r.error)) }, "Inspect selector"),
       h("button", { class: "sp-btn", type: "button", "data-command": "dom.highlight", onclick: () => void run("dom.highlight", { selector: selIn.value, all: true }).then((r) => showResult(grabBody, r.ok ? r.value : r.error)) }, "Highlight"),
-      h("span", { class: "sp-dim" }, hasGrab ? "solid-grab detected: Alt+click anywhere copies source context" : "solid-grab not detected (source attributes need its Vite plugin)"),
     ),
   );
+  grabBody.prepend(inspectSlot);
   bodies.set("grab", grabBody);
 
+  let cancelPick: (() => void) | undefined;
+  cleanups.push(() => cancelPick?.());
   function pickElement() {
+    cancelPick?.();
+    const cancel = () => {
+      document.removeEventListener('click', onClick, true);
+      document.removeEventListener('keydown', onEscape, true);
+      cancelPick = undefined;
+    };
+    const onEscape = (ev: KeyboardEvent) => { if (ev.key === 'Escape') cancel(); };
     const onClick = (ev: MouseEvent) => {
+      if ((ev.target as Element).closest('[data-solid-pulse]')) return;
       ev.preventDefault();
-      ev.stopPropagation();
-      document.removeEventListener("click", onClick, true);
+      ev.stopImmediatePropagation();
+      cancel();
       void run("inspect.element", { x: ev.clientX, y: ev.clientY }).then((r) => {
         showResult(grabBody, r.ok ? r.value : r.error);
         if (r.ok) void run("dom.highlight", { selector: (r.value as { selector: string }).selector });
       });
     };
+    cancelPick = cancel;
+    document.addEventListener('keydown', onEscape, true);
     document.addEventListener("click", onClick, true);
   }
 
@@ -504,7 +533,7 @@ export function mountPanel(pulse: Pulse, options: PanelOptions = {}) {
   }
 
   function available(id: string) {
-    return id === 'query' ? controller.has('inspect.queries') : id === 'scenarios' ? controller.has('scenario.list') : true;
+    return id === 'query' ? Boolean(options.queryDevtools) || controller.has('inspect.queries') : id === 'scenarios' ? controller.has('scenario.list') : true;
   }
   function renderTabs() {
     if (!tabs) return;
@@ -521,12 +550,22 @@ export function mountPanel(pulse: Pulse, options: PanelOptions = {}) {
   }
 
   function setTab(id: string) {
+    if (id === 'solid-grab') id = 'grab'; // Backward-compatible agent/bookmark alias.
+    if (id === 'tanstack' && options.queryDevtools) id = 'query';
     if (!bodies.has(id) || !available(id)) throw new Error(`unknown tab: ${id} (${[...bodies.keys()].filter(available).join(", ")})`);
     activeTab = id;
+    saveView();
     for (const [tid, body] of bodies) body.hidden = tid !== id;
     for (const [tid, btn] of tabButtons) btn.setAttribute("aria-selected", tid === id ? "true" : "false");
     if (id === "pulse") void run("events.list", { limit: rows }).then((r) => renderList(r.ok ? (r.value as PulseEvent[]) : []));
-    if (id === "query") refreshQueryHint();
+    if (id === "query") {
+      refreshQueryHint();
+      if (options.queryDevtools && !queryMounted) {
+        queryMounted = true;
+        const cleanup = options.queryDevtools.mount(querySlot, pulse);
+        if (cleanup) cleanups.push(cleanup);
+      }
+    }
     if (id === "scenarios") void refreshScenario();
     if (id === "record") void refreshRecordings();
   }
@@ -534,6 +573,7 @@ export function mountPanel(pulse: Pulse, options: PanelOptions = {}) {
   function setOpen(next: boolean) {
     if (next === open) return;
     open = next;
+    saveView();
     if (open) {
       drawer ??= buildDrawer();
       root.append(drawer);
@@ -542,6 +582,7 @@ export function mountPanel(pulse: Pulse, options: PanelOptions = {}) {
       setTab(activeTab);
       refreshStatus();
     } else {
+      cancelPick?.();
       drawer?.remove();
       fab.hidden = options.fab === false;
     }
@@ -549,7 +590,7 @@ export function mountPanel(pulse: Pulse, options: PanelOptions = {}) {
 
   controller.register({ name: "panel.open", summary: "Open the panel (never moves focus). Alias of panel.toggle/panel.tab for agents.", args: { tab: "pulse|query|grab|scenarios|record|<custom>" } }, (a) => {
     setOpen(true);
-    if (a.tab !== undefined) setTab(String(a.tab));
+    if (a.tab !== undefined) { savedView.tab = undefined; setTab(String(a.tab)); }
     return { open: true, tab: activeTab };
   });
   controller.register({ name: "panel.close", summary: "Close the panel.", ui: "✕" }, () => {
@@ -561,6 +602,7 @@ export function mountPanel(pulse: Pulse, options: PanelOptions = {}) {
     return { open, tab: activeTab };
   });
   controller.register({ name: "panel.tab", summary: "Switch the panel tab.", args: { name: "tab id" }, ui: "tab strip" }, (a) => {
+    savedView.tab = undefined;
     setOpen(true);
     setTab(String(a.name ?? "pulse"));
     return { open, tab: activeTab };
@@ -593,7 +635,8 @@ export function mountPanel(pulse: Pulse, options: PanelOptions = {}) {
       if (tools.some(t => t.id === id)) continue;
       cleanup();
       toolCleanups.delete(id);
-      bodies.get(id)?.remove();
+      toolBodies.get(id)?.remove();
+      toolBodies.delete(id);
       bodies.delete(id);
     }
     for (const tool of tools) {
@@ -603,10 +646,22 @@ export function mountPanel(pulse: Pulse, options: PanelOptions = {}) {
       try { cleanup = tool.mount(body, pulse); }
       catch (error) { body.textContent = tool.title + ' could not mount: ' + String(error); }
       toolCleanups.set(tool.id, cleanup ?? (() => {}));
+      toolBodies.set(tool.id, body);
+      if (tool.slot === 'inspect') {
+        body.className = '';
+        inspectSlot.append(body);
+        continue;
+      }
       titles[tool.id] = tool.title;
       bodies.set(tool.id, body);
       body.hidden = tool.id !== activeTab;
       drawer?.append(body);
+    }
+    fallbackPicker.hidden = tools.some(t => t.id === 'solid-grab');
+    if (fallbackPicker.hidden) cancelPick?.();
+    if (savedView.tab) {
+      const desired = savedView.tab === 'solid-grab' ? 'grab' : savedView.tab;
+      if (bodies.has(desired) && available(desired)) { activeTab = desired; savedView.tab = undefined; if (open) setTab(desired); }
     }
     if (!bodies.has(activeTab) || !available(activeTab)) activeTab = 'pulse';
     queryBody.hidden = activeTab !== 'query' || !available('query');
@@ -647,7 +702,7 @@ export function mountPanel(pulse: Pulse, options: PanelOptions = {}) {
 
   (document.body ?? document.documentElement).append(root);
   refreshStatus();
-  if (options.open) setOpen(true);
+  if (options.open ?? savedView.open) setOpen(true);
 
   const panel = {
     root,

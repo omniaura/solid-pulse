@@ -19,9 +19,10 @@ export function discoverSolidGrab(pulse: Pulse) {
     if (!api?.status || !api.setBadgeVisible || !api.setPicking || !api.subscribe || !api.status().initialized || api === attached) return;
     detach();
     attached = api;
-    const command = (name: string, summary: string, run: (a: Record<string, unknown>) => unknown, args?: Record<string, string>) => ({ spec: { name, summary, args, ui: 'Solid Grab tab' }, run });
+    const command = (name: string, summary: string, run: (a: Record<string, unknown>) => unknown, args?: Record<string, string>) => ({ spec: { name, summary, args, ui: 'Inspect tab › source context' }, run });
     unregister = registerTool(pulse, {
       id: 'solid-grab', title: 'Solid Grab',
+      slot: 'inspect',
       commands: [
         command('grab.status', 'Read the element picker state.', () => api.status()),
         command('grab.pick', 'Start or cancel element picking.', (a) => {
