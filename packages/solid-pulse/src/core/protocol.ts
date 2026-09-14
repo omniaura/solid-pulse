@@ -4,6 +4,7 @@
  *
  * Page → server
  *   hello      first frame; identifies the tab
+ *   commands   replaces the tab's command contract after late register/unregister
  *   events     batched PulseEvents (≤ 50 ms coalescing)
  *   result     reply to a `command`
  * Server → page
@@ -33,6 +34,11 @@ export interface EventsFrame {
   events: PulseEvent[];
 }
 
+export interface CommandsFrame {
+  type: "commands";
+  commands: CommandSpec[];
+}
+
 export interface ResultFrame {
   type: "result";
   id: string;
@@ -52,7 +58,7 @@ export interface WelcomeFrame {
   protocol: number;
 }
 
-export type PageFrame = HelloFrame | EventsFrame | ResultFrame;
+export type PageFrame = HelloFrame | CommandsFrame | EventsFrame | ResultFrame;
 export type ServerFrame = CommandFrame | WelcomeFrame;
 
 export interface ClientSummary {
@@ -66,10 +72,48 @@ export interface ClientSummary {
   commands: number;
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+function isCommandSpec(value: unknown): value is CommandSpec {
+  if (!isRecord(value)) return false;
+  if (typeof value.name !== "string" || value.name.length === 0) return false;
+  if (typeof value.summary !== "string") return false;
+  if (value.ui !== undefined && typeof value.ui !== "string") return false;
+  if (value.args !== undefined) {
+    if (!isRecord(value.args)) return false;
+    for (const v of Object.values(value.args)) if (typeof v !== "string") return false;
+  }
+  return true;
+}
+
+function isCommandSpecs(value: unknown): value is CommandSpec[] {
+  return Array.isArray(value) && value.every(isCommandSpec);
+}
+
 export function isPageFrame(value: unknown): value is PageFrame {
-  if (!value || typeof value !== "object") return false;
-  const t = (value as { type?: unknown }).type;
-  return t === "hello" || t === "events" || t === "result";
+  if (!isRecord(value)) return false;
+  switch (value.type) {
+    case "hello":
+      return (
+        typeof value.protocol === "number" &&
+        typeof value.clientId === "string" &&
+        typeof value.url === "string" &&
+        typeof value.title === "string" &&
+        typeof value.userAgent === "string" &&
+        typeof value.startedWall === "number" &&
+        isCommandSpecs(value.commands)
+      );
+    case "commands":
+      return isCommandSpecs(value.commands);
+    case "events":
+      return Array.isArray(value.events);
+    case "result":
+      return typeof value.id === "string" && isRecord(value.result);
+    default:
+      return false;
+  }
 }
 
 export function isServerFrame(value: unknown): value is ServerFrame {

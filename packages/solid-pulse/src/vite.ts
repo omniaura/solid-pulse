@@ -77,6 +77,7 @@ export default function solidPulse(options: SolidPulseVitePluginOptions = {}): P
         `const pulse = initPulse(${JSON.stringify(opts)});`,
         setupModule ? `try { if (typeof setup === "function") setup(pulse); else console.warn("[solid-pulse] setup module must export default (pulse) => void"); } catch (e) { console.warn("[solid-pulse] setup module failed", e); }` : "",
         panel ? `mountPanel(pulse);` : "",
+        `if (import.meta.hot) import.meta.hot.dispose(() => pulse.destroy());`,
         `export default pulse;`,
       ]
         .filter(Boolean)

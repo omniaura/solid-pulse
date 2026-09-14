@@ -222,7 +222,10 @@ export class BridgeServer {
       }
       if (!state) return;
       state.summary.lastSeenWall = Date.now();
-      if (frame.type === "events") {
+      if (frame.type === "commands") {
+        state.commands = frame.commands;
+        state.summary.commands = frame.commands.length;
+      } else if (frame.type === "events") {
         const fresh: PulseEvent[] = [];
         for (const e of frame.events) {
           // Replayed history after a reconnect may repeat; keep the buffer monotonic.

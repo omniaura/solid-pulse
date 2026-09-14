@@ -59,7 +59,36 @@ Read-only: it subscribes to the `QueryCache`/`MutationCache` and never changes q
 
 ### Panel placement
 
-`mountPanel(pulse, { fab: false })` hides the floating ◉ button — use it in simulator/QA builds where a fixed button could cover app chrome (on a mobile viewport it sits exactly over a bottom tab bar and intercepts taps). The panel stays reachable via **Alt+Shift+P** (`hotkey` option), `solid-pulse panel.open`, or `window.__SOLID_PULSE__.run("panel.open")`.
+The single Devtools launcher opens a floating, draggable panel. Use the header selector to pin it to any corner; pinned and floating positions survive reloads and remain within the viewport on resize. Choose a default that avoids your app navigation:
+
+```ts
+mountPanel(pulse, { position: "top-right", storageKey: "my-app:devtools" });
+```
+
+The default is bottom-right. Set `storageKey: false` to disable persistence, or `fab: false` for keyboard/CLI-only access. **Alt+Shift+P**, `panel.open`, `panel.close`, `panel.pin corner=top-left`, and `panel.move x=80 y=60` use the same controller as the UI. `panel.status` reports available tabs and effective placement.
+
+### Optional tools
+
+Tools contribute a tab and commands through one supported registration API; they can attach before or after the panel mounts. Removing a tool removes its view and commands. The panel and bridge command list update when tools change.
+
+```ts
+import { registerTool } from "@omniaura/solid-pulse/panel";
+const remove = registerTool(pulse, {
+  id: "my-tool", title: "My tool",
+  commands: [{ spec: { name: "my-tool.status", summary: "Read tool state" }, run: () => ({ ready: true }) }],
+  mount(container, pulse) {
+    const button = document.createElement("button");
+    button.textContent = "Status";
+    button.onclick = () => void pulse.run("my-tool.status");
+    container.append(button);
+    return () => button.remove();
+  },
+});
+// HMR / tool teardown:
+remove();
+```
+
+The panel automatically discovers the supported Solid Grab runtime, including late initialization, and hosts its picker while hiding its standalone badge. Query and Scenarios appear when their adapters register commands. Other tools use `registerTool`; installing an arbitrary npm package alone does not provide an integration contract.
 
 ### The combined panel (pulse + TanStack Query devtools)
 
@@ -141,6 +170,6 @@ focus.lost    textarea — element removed from document
 
 ## solid-grab
 
-If [`solid-grab`](https://github.com/omniaura/solid-grab) is installed, `inspect.element` returns its formatted source context (file:line:column and component chain) in addition to pulse's own attribution, and the panel's Grab tab explains Alt+click. solid-grab's `data-solid-component` attributes also improve the overlay's component→DOM mapping.
+With a supported [`solid-grab`](https://github.com/omniaura/solid-grab) runtime initialized, the panel automatically adds a **Solid Grab** tab with Pick/Cancel and selector inspection. Its separate badge is hidden while hosted and restored on panel teardown. `grab.status`, `grab.pick on=true`, and `grab.inspect selector=button` expose the same controls to agents. Existing `inspect.element` and held-key picking remain available. Older Grab runtimes still contribute source context to `inspect.element`, but need an upgrade for the hosted picker.
 
 MIT © omniaura

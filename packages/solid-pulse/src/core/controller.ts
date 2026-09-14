@@ -59,6 +59,7 @@ export type FeatureListener = (feature: Feature, on: boolean) => void;
 export class PulseController {
   readonly bus: EventBus;
   private commands = new Map<string, { spec: CommandSpec; handler: CommandHandler }>();
+  private commandListeners = new Set<() => void>();
   private features: Record<Feature, boolean>;
   private featureListeners = new Set<FeatureListener>();
   filters: Filters = { kinds: [], component: "", text: "" };
@@ -148,10 +149,17 @@ export class PulseController {
   register(spec: CommandSpec, handler: CommandHandler) {
     if (this.commands.has(spec.name)) throw new Error(`command already registered: ${spec.name}`);
     this.commands.set(spec.name, { spec, handler });
+    for (const listener of this.commandListeners) listener();
   }
 
   unregister(name: string) {
     this.commands.delete(name);
+    for (const listener of this.commandListeners) listener();
+  }
+
+  onCommands(listener: () => void) {
+    this.commandListeners.add(listener);
+    return () => { this.commandListeners.delete(listener); };
   }
 
   has(name: string) {
