@@ -27,6 +27,7 @@ export function mountRecordings(pulse: Pulse, visible: () => boolean) {
   const empty = el('p', 'No recordings yet. Start recording, reproduce the issue, then stop and download the JSON.', 'sp-dim');
   let disposed = false;
   let busy = false;
+  let lastActive: string | null = null;
 
   async function command(name: string, args: Record<string, unknown> = {}) {
     const result = await controller.run(name, args);
@@ -52,10 +53,11 @@ export function mountRecordings(pulse: Pulse, visible: () => boolean) {
   const start = button('Start recording', 'record.start', async () => {
     if (bus.paused) throw new Error('Resume capture before starting a recording.');
     await command('record.start');
+    message.textContent = 'Recording started. Reproduce the issue, then stop and download.';
   });
   start.classList.add('sp-record-primary');
-  const stop = button('Stop recording', 'record.stop', async () => { await command('record.stop'); });
-  const resume = button('Resume capture', 'events.resume', async () => { await command('events.resume'); });
+  const stop = button('Stop recording', 'record.stop', async () => { await command('record.stop'); message.textContent = 'Recording stopped. Download its JSON below.'; });
+  const resume = button('Resume capture', 'events.resume', async () => { await command('events.resume'); message.textContent = 'Capture resumed.'; });
   const actions = el('div', '', 'sp-row');
   actions.append(start, stop, resume);
   const hint = el('p', 'Records new events from enabled instruments, regardless of log filters. Stopping a recording leaves the live log running.', 'sp-dim');
@@ -72,6 +74,7 @@ export function mountRecordings(pulse: Pulse, visible: () => boolean) {
     message.textContent = 'Marker added to the active recording.';
   });
   note.addEventListener('input', () => { addNote.disabled = busy || !note.value.trim() || bus.paused || !bus.currentRecording(); });
+  note.addEventListener('keydown', event => { if (event.key === 'Enter' && !event.isComposing) { event.preventDefault(); addNote.click(); } });
   const noteRow = el('div', '', 'sp-row');
   noteRow.append(note, addNote);
 
@@ -96,6 +99,12 @@ export function mountRecordings(pulse: Pulse, visible: () => boolean) {
     if (disposed) return;
     const active = bus.currentRecording();
     const recordings = bus.listRecordings();
+    const focused = document.activeElement;
+    if (lastActive && !active) {
+      const stopped = recordings.find(r => r.id === lastActive);
+      if (stopped?.stopReason === 'bytes' || stopped?.stopReason === 'events') message.textContent = 'Recording stopped automatically: ' + (stopped.stopReason === 'bytes' ? 'size' : 'event') + ' limit reached. Download its JSON below.';
+    }
+    lastActive = active?.id ?? null;
     state.textContent = active ? (bus.paused ? 'Recording · capture paused' : 'Recording in progress') : (bus.paused ? 'Capture is paused' : 'Ready to record');
     state.dataset.active = active ? 'true' : 'false';
     detail.textContent = active
@@ -104,17 +113,17 @@ export function mountRecordings(pulse: Pulse, visible: () => boolean) {
     progress.hidden = !active;
     progress.value = active ? Math.max(active.events.length / active.limit, active.bytes / MAX_RECORDING_BYTES) : 0;
     start.hidden = !!active;
-    start.disabled = busy || bus.paused;
+    start.disabled = bus.paused;
     stop.hidden = !active;
-    stop.disabled = busy;
+    stop.disabled = false;
     resume.hidden = !bus.paused;
-    resume.disabled = busy;
-    note.disabled = !active || bus.paused || busy;
-    addNote.disabled = !active || bus.paused || busy || !note.value.trim();
-    live.disabled = busy || bus.buffer.size === 0;
+    resume.disabled = false;
+    note.disabled = !active || bus.paused;
+    addNote.disabled = !active || bus.paused || !note.value.trim();
+    live.disabled = bus.buffer.size === 0;
     empty.hidden = recordings.length > 0;
     const ids = new Set(recordings.map(r => r.id));
-    for (const [id, row] of rows) if (!ids.has(id)) { row.node.remove(); rows.delete(id); }
+    for (const [id, row] of rows) if (!ids.has(id)) { if (row.node.contains(focused)) (active ? stop : start).focus(); row.node.remove(); rows.delete(id); }
     for (const rec of recordings) {
       let row = rows.get(rec.id);
       if (!row) {
@@ -135,8 +144,12 @@ export function mountRecordings(pulse: Pulse, visible: () => boolean) {
       const reason = rec.active ? (bus.paused ? 'Capture paused' : 'Recording') : rec.stopReason === 'bytes' ? 'Stopped automatically · size limit reached' : rec.stopReason === 'events' ? 'Stopped automatically · event limit reached' : 'Stopped';
       row.info.textContent = reason + ' · ' + rec.events.toLocaleString() + ' events · ~' + size(rec.bytes);
       row.download.textContent = rec.active ? 'Download snapshot' : 'Download JSON';
-      row.download.disabled = busy;
+      row.download.setAttribute('aria-disabled', String(busy));
     }
+    // Only restore focus when the focused control itself disappeared/disabled;
+    // agent actions must never steal focus from the application.
+    if ((focused === start && start.hidden) || (focused === resume && resume.hidden)) (active ? stop : start).focus();
+    else if ((focused === stop && stop.hidden) || (focused === note && note.disabled) || (focused === addNote && addNote.disabled)) (bus.paused ? resume : active ? stop : start).focus();
   }
   const timer = setInterval(() => { if (visible() && !document.hidden) refresh(); }, 500);
   refresh();

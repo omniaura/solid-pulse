@@ -37,6 +37,13 @@ describe('recording workflow', () => {
       save.click(); await settle();
       expect(exports.at(-1)).toEqual({ recording: id });
       expect(pulse.bus.currentRecording()!.id).toBe(id);
+      const snapshot = await originalExport('export', { recording: id });
+      expect(snapshot.ok).toBe(true);
+      if (!snapshot.ok) throw new Error(snapshot.error);
+      const frozen = snapshot.value as { meta: { count: number; recording: { active: boolean } }; events: unknown[] };
+      pulse.bus.emit('pulse.note', { note: 'after snapshot' });
+      expect(frozen.events.length).toBe(frozen.meta.count);
+      expect(frozen.meta.recording.active).toBe(true);
       button('record.stop').click(); await settle();
       expect(view.body.textContent).toContain('Stopped');
       expect(pulse.bus.paused).toBe(false);
@@ -44,6 +51,10 @@ describe('recording workflow', () => {
       pulse.bus.emit('pulse.note', { note: 'limit' }); view.refresh();
       expect(auto.stopReason).toBe('events');
       expect(view.body.textContent).toContain('Stopped automatically · event limit reached');
+      const bytes = pulse.bus.startRecording('byte-limit');
+      for (let i = 0; i < 2000 && !bytes.stoppedAt; i++) pulse.bus.emit('pulse.note', { note: 'x'.repeat(8000) });
+      view.refresh();
+      expect(view.body.textContent).toContain('Stopped automatically · size limit reached');
       for (let i = 0; i < 6; i++) pulse.bus.startRecording('extra-' + i);
       view.refresh();
       expect(view.body.querySelectorAll('[data-recording-id]').length).toBe(5);
