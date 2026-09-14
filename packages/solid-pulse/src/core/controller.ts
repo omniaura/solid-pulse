@@ -282,24 +282,25 @@ export class PulseController {
       const rec = this.bus.stopRecording();
       return rec ? { id: rec.id, events: rec.events.length } : null;
     });
-    this.register({ name: "record.list", summary: "Recordings kept in memory (last 5).", ui: "Record tab › list" }, () => this.bus.listRecordings());
+    this.register({ name: "record.list", summary: "Recordings kept in memory (last 5).", ui: "Record tab › Recordings in this page" }, () => this.bus.listRecordings());
     this.register(
       {
         name: "export",
         summary: "Export a recording (or the live buffer) as JSON: {meta, events}.",
         args: { recording: "recording id; omit for the live buffer", filtered: "true = apply filters to the live buffer" },
-        ui: "Record tab › Export",
+        ui: "Record tab › Download JSON / Download snapshot / Download live log",
       },
       (a) => {
         const id = a.recording === undefined ? null : String(a.recording);
         const rec = id ? this.bus.getRecording(id) : null;
         if (id && !rec) throw new Error(`unknown recording: ${id}`);
-        const events = rec ? rec.events : a.filtered === true || a.filtered === "true" ? this.events({ limit: 100_000 }) : this.bus.list({ limit: 100_000 });
+        const events = rec ? rec.events.slice() : a.filtered === true || a.filtered === "true" ? this.events({ limit: 100_000 }) : this.bus.list({ limit: 100_000 });
         return {
           meta: {
             tool: "@omniaura/solid-pulse",
             exportedWall: Date.now(),
-            recording: rec ? { id: rec.id, startedWall: rec.startedWall, stoppedAt: rec.stoppedAt } : null,
+            recording: rec ? { id: rec.id, startedWall: rec.startedWall, stoppedAt: rec.stoppedAt, active: rec === this.bus.currentRecording(), stopReason: rec.stopReason ?? null, limit: rec.limit, bytes: rec.bytes } : null,
+            filtered: !rec && (a.filtered === true || a.filtered === "true"),
             features: this.snapshotFeatures(),
             filters: this.filters,
             count: events.length,
