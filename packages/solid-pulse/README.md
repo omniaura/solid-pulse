@@ -57,11 +57,21 @@ attachQueryClient(pulse, queryClient);
 
 Read-only: it subscribes to the `QueryCache`/`MutationCache` and never changes query behaviour. With the Vite plugin, point `setupModule: "/src/pulse-setup.ts"` at a module that `export default (pulse) => { attachQueryClient(pulse, queryClient) }` — it is evaluated before your app's entry module, so the very first observers are attributed.
 
-### Panel placement
+### Bounded capture
+
+The live page buffer retains at most 2,000 events and a 4 MiB **estimated payload** budget (whichever fills first). Old events roll out; status shows evictions. Each event is snapshotted with an 8,192-character / 256-node / 8-level budget, marks truncation, and never retains application object graphs. These are diagnostic budgets, not a claim that the browser process heap is exactly 4 MiB.
+
+Recordings stop at 20,000 events or 4 MiB estimated payload, whichever comes first, with a reported stop reason. Five recent recordings are retained (up to roughly 20 MiB of budgeted payload). Invalid or unlimited recording limits are rejected. The panel renders recent rows in batches at most 10 times per second, with no live log DOM work while closed, hidden, or on another tab. Intermediate display rows may be coalesced; the page buffer remains available via events.list/export.
+
+The bridge has a 200-event pending queue, drains up to 200 events in batches of 20 per 50 ms tick, and pauses event sends when the socket has 512 KiB pending. Saturated queues keep the newest events; drop counts appear in the panel, bridge.status, mirror events/clients and live tail. The initial/reconnect replay is the latest 200 events, not the full page history; use events.list (the page command) or export for more. The server mirror also has a 4 MiB payload budget. Slow CLI live tails disconnect above 512 KiB of queued output and report an error instead of accumulating output or ending silently; reconnect and query recent history, noting sequence gaps. SSE diagnostics retain at most 64 KiB of an incomplete frame; app response bytes pass through unchanged.
+
+Human Status/bridge status controls and CLI status/bridge.status expose the same limits, counters and recording stop reasons. Capturing every event is inherently work; these bounds prevent retained history and rendering queues from growing with session duration, not zero overhead.
 
 Feature flags and event filters persist per browser origin by default. Saved choices override initial `features`; use `initPulse({ storageKey: false })` for deterministic harnesses, or a custom key to isolate configurations. All switches persist, including `captureBodies`: turn it off when finished capturing payloads. Only preferences are saved, never events, request bodies or recordings. Invalid/denied storage falls back safely. Ports are separate browser origins.
 
 The panel also remembers its open/closed state and selected tab. An explicit `open` option overrides the saved visibility; `mountPanel({ storageKey: false })` disables panel persistence independently of runtime preferences.
+
+### Panel placement
 
 The single Devtools launcher opens a floating, draggable panel. Use the header selector to pin it to any corner; pinned and floating positions survive reloads and remain within the viewport on resize. Choose a default that avoids your app navigation:
 

@@ -61,6 +61,15 @@ describe("bridge server", () => {
     expect((await api("/command", { method: "POST", body: JSON.stringify({ name: "status", client: "ghost" }) })).status).toBe(404);
 
     // live stream
+    // Sustained large events retain bounded diagnostic payloads in the mirror.
+    for (let batch=0;batch<30;batch++) ws.send(JSON.stringify({type:'events',events:Array.from({length:100},(_,i)=>({seq:3+batch*100+i,t:1,wall:1,kind:'pulse.note',data:{note:'x'.repeat(4000)}}))}));
+    await new Promise(r=>setTimeout(r,250));
+    const retained=await api('/events?limit=5000');
+    expect((retained.body as any).count).toBeLessThan(1000);
+    expect(JSON.stringify(retained.body).length).toBeLessThan(4*1024*1024);
+
+    // Clear before the stream's original low sequence fixture.
+    await api('/command',{method:'POST',body:JSON.stringify({name:'events.clear'})});
     const stream = await nativeFetch(`${url}/api/events/stream?kinds=dom`);
     const reader = stream.body!.getReader();
     ws.send(JSON.stringify({ type: "events", events: [{ seq: 3, t: 3, wall: 3, kind: "dom.reattach", data: {} }, { seq: 4, t: 4, wall: 4, kind: "query.update", data: {} }] }));

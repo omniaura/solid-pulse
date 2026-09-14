@@ -84,26 +84,38 @@ function keyLabel(key: readonly unknown[]): string {
 export function attachQueryClient(pulse: Pulse, client: QueryClientLike, options: QueryAdapterOptions = {}): () => void {
   const { controller, bus, overlay } = pulse;
   const observers = new WeakMap<QueryObserverLike, ComponentRef | null>();
-  const fetchStarts = new Map<string, number>();
+  let fetchStarts = new WeakMap<QueryLike, number>();
   // The fetch an observer's mount triggers is dispatched synchronously, right
   // after `observerAdded`, so the initiator is only valid for the current tick.
   let pendingInitiator: { hash: string; component: ComponentRef | null } | null = null;
+  let disposed = false;
+  let badgeScheduled = false;
+  const badges: Array<{title:string;body:string;component:ComponentRef|null}> = [];
 
   // Cache notifications fire synchronously inside the app's reactive scope;
   // measuring there forces layout mid-update. Defer the (single) rect read to
   // the next animation frame — the badge is a visual, a frame late is fine.
   const badge = (title: string, body: string, component: ComponentRef | null) => {
-    if (!overlay || !controller.isOn("queryOverlay")) return;
+    if (!overlay || !controller.isOn("queryOverlay") || disposed) return;
+    if (badges.length < 4) badges.push({title,body,component});
+    if (badgeScheduled) return;
+    badgeScheduled = true;
     const run = () => {
+      badgeScheduled = false;
+      const pending = badges.splice(0);
+      if (disposed || !controller.isOn('queryOverlay')) return;
+      for (const {title,body,component} of pending) {
       const rect = component && pulse.solid ? pulse.solid.rectFor(component) : null;
       overlay.badge({ title, body }, rect, { ms: options.badgeMs ?? 1200, kind: "query" });
       if (rect && controller.isOn("flash")) overlay.flash([rect], "query", { ms: 700 });
+      }
     };
     if (typeof requestAnimationFrame === "function") requestAnimationFrame(run);
     else setTimeout(run, 16);
   };
 
   const onQuery = (e: QueryCacheNotifyEventLike) => {
+    if (e.type === 'removed' || (e.type === 'updated' && e.query.state.fetchStatus === 'idle' && e.action?.type !== 'success' && e.action?.type !== 'error')) fetchStarts.delete(e.query);
     if (!controller.isOn("query")) return;
     const q = e.query;
     const key = q.queryKey as readonly unknown[];
@@ -147,7 +159,7 @@ export function attachQueryClient(pulse: Pulse, client: QueryClientLike, options
         if (!e.action) break;
         const action = e.action;
         if (action.type === "fetch") {
-          fetchStarts.set(hash, performance.now());
+          fetchStarts.set(q, performance.now());
           const recent = pendingInitiator && pendingInitiator.hash === hash ? pendingInitiator : null;
           if (recent) pendingInitiator = null;
           const trigger = recent ? "observer-mount" : q.state.isInvalidated ? "invalidation" : q.state.dataUpdatedAt ? "background-refetch" : "initial";
@@ -158,12 +170,12 @@ export function attachQueryClient(pulse: Pulse, client: QueryClientLike, options
           );
           if (trigger !== "observer-mount") badge(`↻ fetching (${trigger})`, label, null);
         } else if (action.type === "success") {
-          const started = fetchStarts.get(hash);
-          fetchStarts.delete(hash);
+          const started = fetchStarts.get(q);
+          fetchStarts.delete(q);
           bus.emit("query.fetch.success", { hash, key: redactValue(key), label, ms: started ? Math.round(performance.now() - started) : null, manual: action.manual ?? false, observers: q.getObserversCount() });
         } else if (action.type === "error") {
-          const started = fetchStarts.get(hash);
-          fetchStarts.delete(hash);
+          const started = fetchStarts.get(q);
+          fetchStarts.delete(q);
           const err = action.error as { name?: string; message?: string } | undefined;
           bus.emit("query.fetch.error", { hash, key: redactValue(key), label, ms: started ? Math.round(performance.now() - started) : null, name: err?.name ?? "Error", message: String(err?.message ?? err ?? ""), observers: q.getObserversCount(), hadData: q.state.data !== undefined });
         } else if (action.type === "invalidate") {
@@ -239,6 +251,9 @@ export function attachQueryClient(pulse: Pulse, client: QueryClientLike, options
 
   bus.emit("pulse.note", { note: "solid-query adapter attached" });
   return () => {
+    disposed = true;
+    badges.length = 0;
+    fetchStarts = new WeakMap();
     unsubQuery();
     unsubMutation();
     controller.unregister("inspect.queries");

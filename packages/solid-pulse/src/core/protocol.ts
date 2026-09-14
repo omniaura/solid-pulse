@@ -32,6 +32,7 @@ export interface HelloFrame {
 export interface EventsFrame {
   type: "events";
   events: PulseEvent[];
+  dropped?: number;
 }
 
 export interface CommandsFrame {
@@ -62,6 +63,7 @@ export type PageFrame = HelloFrame | CommandsFrame | EventsFrame | ResultFrame;
 export type ServerFrame = CommandFrame | WelcomeFrame;
 
 export interface ClientSummary {
+  dropped?: number;
   clientId: string;
   url: string;
   title: string;

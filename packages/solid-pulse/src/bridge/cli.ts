@@ -117,7 +117,8 @@ async function api(base: string, route: string, init?: RequestInit): Promise<unk
   return body;
 }
 
-function fmtEvent(e: { seq: number; t: number; kind: string; component?: { name: string } | null; data: Record<string, unknown> }): string {
+export function fmtEvent(e: { seq: number; t: number; kind: string; component?: { name: string } | null; data: Record<string, unknown>; truncated?: boolean }): string {
+  if (e.truncated) return '#' + e.seq + ' ' + e.kind + ' [truncated] ' + JSON.stringify(e.data).slice(0, 160);
   const d = e.data;
   const comp = e.component?.name ? ` <${e.component.name}>` : "";
   let summary = "";
@@ -214,7 +215,8 @@ async function main() {
       return;
     }
     case "events": {
-      const r = (await api(base, `/events${q({ since: kv.since, kinds: kv.kinds, limit: kv.limit ?? 50 })}`)) as { events: Parameters<typeof fmtEvent>[0][] };
+      const r = (await api(base, `/events${q({ since: kv.since, kinds: kv.kinds, limit: kv.limit ?? 50 })}`)) as { events: Parameters<typeof fmtEvent>[0][]; dropped?: number };
+      if (r.dropped) process.stderr.write('bridge dropped ' + r.dropped + ' events; use events.list for page history\n');
       if (asJson) return out(r);
       for (const e of r.events) process.stdout.write(fmtEvent(e) + "\n");
       return;
@@ -225,9 +227,10 @@ async function main() {
       const reader = res.body.getReader();
       const dec = new TextDecoder();
       let buf = "";
+      let lastDropped = 0;
       for (;;) {
         const { value, done } = await reader.read();
-        if (done) break;
+        if (done) throw new Error('live tail disconnected; reconnect and use events.list to inspect page history (sequence gaps may exist)');
         buf += dec.decode(value, { stream: true });
         let idx: number;
         while ((idx = buf.indexOf("\n\n")) >= 0) {
@@ -235,7 +238,8 @@ async function main() {
           buf = buf.slice(idx + 2);
           const data = frame.split("\n").find((l) => l.startsWith("data: "));
           if (!data) continue;
-          const e = JSON.parse(data.slice(6)) as Parameters<typeof fmtEvent>[0];
+          const e = JSON.parse(data.slice(6)) as Parameters<typeof fmtEvent>[0] & { dropped?: number };
+          if (e.dropped && e.dropped > lastDropped) { process.stderr.write('bridge dropped ' + e.dropped + ' events; use events.list for page history\n'); lastDropped = e.dropped; }
           process.stdout.write((asJson ? JSON.stringify(e) : fmtEvent(e)) + "\n");
         }
       }

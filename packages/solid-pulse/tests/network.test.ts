@@ -40,6 +40,26 @@ afterEach(() => {
 });
 
 describe("network instrumentation", () => {
+  test('oversize SSE frames pass through unchanged with bounded diagnostics and shared abort signals release listeners', async () => {
+    const payload = 'data: ' + 'x'.repeat(200_000) + '\n\n' + 'event: done\ndata: ok\n\n';
+    g.fetch = (async () => new Response(payload, { headers: { 'content-type': 'text/event-stream' } })) as unknown as typeof fetch;
+    g.WebSocket = FakeWS;
+    const controller = new PulseController(new EventBus(), { captureBodies: true });
+    const net = installNetwork(controller, null);
+    const signal = new AbortController().signal;
+    let added=0, removed=0;
+    const add=signal.addEventListener.bind(signal), remove=signal.removeEventListener.bind(signal);
+    signal.addEventListener=((...args: Parameters<typeof add>)=>{added++;return add(...args);}) as typeof add;
+    signal.removeEventListener=((...args: Parameters<typeof remove>)=>{removed++;return remove(...args);}) as typeof remove;
+    try {
+      for(let i=0;i<3;i++) expect(await (await fetch('/oversize',{signal})).text()).toBe(payload);
+      const messages=controller.bus.list({limit:100}).filter(e=>e.kind==='net.sse.message');
+      expect(messages).toHaveLength(6);
+      expect(messages[0]!.data).toMatchObject({truncated:true,preview:'[oversize frame]'});
+      expect(messages[1]!.data).toMatchObject({event:'done',truncated:false});
+      expect(added).toBe(removed);
+    } finally {net.dispose();}
+  });
   test("fetch start/end/error with redaction, SSE frame counting, abort", async () => {
     g.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);

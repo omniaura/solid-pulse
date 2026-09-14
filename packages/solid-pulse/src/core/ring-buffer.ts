@@ -16,6 +16,9 @@ export class RingBuffer<T> {
   get size() {
     return this.count;
   }
+  get last(): T | undefined {
+    return this.count ? this.items[(this.head + this.count - 1) % this.capacity] : undefined;
+  }
 
   get dropped() {
     return this.pushed - this.count;
@@ -34,6 +37,16 @@ export class RingBuffer<T> {
   }
 
   /** Oldest → newest. */
+  shift(): T | undefined {
+    if (!this.count) return undefined;
+    const item = this.items[this.head];
+    this.items[this.head] = undefined;
+    this.head = (this.head + 1) % this.capacity;
+    this.count--;
+    return item;
+  }
+
+  /** Oldest → newest. */
   toArray(): T[] {
     const out: T[] = new Array(this.count);
     for (let i = 0; i < this.count; i++) {
@@ -46,5 +59,6 @@ export class RingBuffer<T> {
     this.items = new Array(this.capacity);
     this.head = 0;
     this.count = 0;
+    this.pushed = 0;
   }
 }

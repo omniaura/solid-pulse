@@ -62,22 +62,30 @@ export function installNetwork(controller: PulseController, solid: SolidInstrume
     if (!res.body) return res;
     let count = 0;
     let carry = "";
+    let discarded = 0;
     const decoder = new TextDecoder();
     const startedAt = performance.now();
     const reader = res.body.getReader();
     bus.emit("net.sse.open", { id, url, transport: "fetch" });
     const scan = (chunk: Uint8Array) => {
-      carry += decoder.decode(chunk, { stream: true });
+      const decoded = decoder.decode(chunk, { stream: true });
+      for (let offset = 0; offset < decoded.length; offset += 8192) {
+      carry += decoded.slice(offset, offset + 8192);
       let idx: number;
       while ((idx = carry.search(/\r?\n\r?\n/)) >= 0) {
         const frame = carry.slice(0, idx);
         carry = carry.slice(idx).replace(/^\r?\n\r?\n/, "");
-        if (!frame.trim() || frame.startsWith(":")) continue;
+        const truncated = discarded > 0;
+        const bytes = frame.length + discarded;
+        discarded = 0;
+        if (!truncated && (!frame.trim() || frame.startsWith(":"))) continue;
         count++;
         const evt = /^event:\s?(.*)$/m.exec(frame)?.[1] ?? "message";
         if (count <= MAX_INDIVIDUAL_STREAM_MESSAGES || count % 50 === 0) {
-          bus.emit("net.sse.message", { id, url, event: evt, n: count, bytes: frame.length, transport: "fetch", preview: preview(frame, controller.isOn("captureBodies")) });
+          bus.emit("net.sse.message", { id, url, event: evt, n: count, bytes, truncated, transport: "fetch", preview: truncated ? '[oversize frame]' : preview(frame, controller.isOn("captureBodies")) });
         }
+      }
+      if (carry.length > 65536) { discarded += carry.length - 3; carry = carry.slice(-3); }
       }
     };
     const done = () => bus.emit("net.sse.close", { id, url, messages: count, ms: Math.round(performance.now() - startedAt), transport: "fetch" });
@@ -114,13 +122,15 @@ export function installNetwork(controller: PulseController, solid: SolidInstrume
     const component = solid?.currentComponent() ?? null;
     let aborted = false;
     const signal = init?.signal ?? req?.signal;
+    const onAbort = () => { aborted = true; };
     if (signal) {
       if (signal.aborted) aborted = true;
-      else signal.addEventListener("abort", () => (aborted = true), { once: true });
+      else signal.addEventListener("abort", onAbort, { once: true });
     }
     bus.emit("net.fetch.start", { id, method, url, bodyBytes: bodySize(init?.body), preview: preview(init?.body, controller.isOn("captureBodies")) }, { component });
     return origFetch.call(this, input, init).then(
       (res: Response) => {
+        signal?.removeEventListener('abort', onAbort);
         const ms = Math.round((performance.now() - start) * 100) / 100;
         const ct = res.headers.get("content-type") ?? "";
         const sse = ct.includes("text/event-stream");
@@ -132,6 +142,7 @@ export function installNetwork(controller: PulseController, solid: SolidInstrume
         return sse ? wrapSse(res, id, url) : res;
       },
       (err: unknown) => {
+        signal?.removeEventListener('abort', onAbort);
         const ms = Math.round((performance.now() - start) * 100) / 100;
         const e = err as { name?: string; message?: string } | null;
         bus.emit("net.fetch.error", { id, method, url, ms, name: e?.name ?? "Error", message: redactText(String(e?.message ?? err)), aborted: aborted || e?.name === "AbortError" }, { component });

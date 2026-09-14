@@ -8,6 +8,8 @@
 
 import type { Pulse } from "../index.js";
 import type { PulseEvent } from "../core/events.js";
+import { RingBuffer } from '../core/ring-buffer.js';
+import { MAX_BUFFER_BYTES } from '../core/bus.js';
 import { OWN_ATTR } from "../overlay/flash.js";
 import { FEATURES, type Feature } from "../core/controller.js";
 import { onTools, registeredTools } from './tools.js';
@@ -116,6 +118,7 @@ function group(kind: string) {
 
 function isWarn(e: PulseEvent) {
   if (e.kind === "dom.reattach") {
+    if (e.truncated) return Boolean(e.data.focusLost);
     const d = e.data as { scrollReset?: Array<{ reset: boolean }>; focusLost?: boolean };
     return Boolean(d.focusLost || d.scrollReset?.some((s) => s.reset));
   }
@@ -123,6 +126,7 @@ function isWarn(e: PulseEvent) {
 }
 
 function oneLine(e: PulseEvent): string {
+  if (e.truncated) return '[truncated] ' + JSON.stringify(e.data).slice(0, 140);
   const d = e.data;
   const comp = e.component?.name ? `<${e.component.name}> ` : "";
   switch (e.kind) {
@@ -152,7 +156,7 @@ function oneLine(e: PulseEvent): string {
 export function mountPanel(pulse: Pulse, options: PanelOptions = {}) {
   mountedPanels.get(pulse)?.();
   const { controller } = pulse;
-  const rows = options.rows ?? 150;
+  const rows = Math.max(1, Math.min(500, Math.floor(options.rows ?? 150) || 150));
   const root = h("div", { [OWN_ATTR]: "panel-root" });
   const style = h("style");
   style.textContent = CSS;
@@ -296,22 +300,37 @@ export function mountPanel(pulse: Pulse, options: PanelOptions = {}) {
   }
 
   function renderList(events: PulseEvent[]) {
+    pending.clear();
     list.textContent = "";
     for (const e of events.slice(-rows)) list.append(rowFor(e));
     list.lastElementChild?.scrollIntoView({ block: "nearest" });
   }
 
+  const pending = new RingBuffer<PulseEvent>(rows);
+  let renderTimer: ReturnType<typeof setTimeout> | undefined;
   let autoScroll = true;
-  list.addEventListener("scroll", () => {
-    autoScroll = list.scrollTop + list.clientHeight >= list.scrollHeight - 24;
+  function flushRows() {
+    renderTimer = undefined;
+    const retained = new Set(controller.bus.list({ limit: controller.bus.buffer.capacity }).map(e => e.seq));
+    const events = pending.toArray().filter(e => retained.has(e.seq));
+    pending.clear();
+    if (!open || activeTab !== 'pulse' || document.hidden || !events.length) return;
+    const fragment = document.createDocumentFragment();
+    for (const e of events) fragment.append(rowFor(e));
+    while (list.children.length + events.length > rows) list.firstElementChild?.remove();
+    list.append(fragment);
+    if (autoScroll) pulseBody.scrollTop = pulseBody.scrollHeight;
+  }
+  cleanups.push(() => { if (renderTimer) clearTimeout(renderTimer); pending.clear(); });
+  pulseBody.addEventListener("scroll", () => {
+    autoScroll = pulseBody.scrollTop + pulseBody.clientHeight >= pulseBody.scrollHeight - 24;
   });
   cleanups.push(
     controller.bus.subscribe((e) => {
-      if (!open || activeTab !== "pulse") return;
+      if (!open || activeTab !== "pulse" || document.hidden) return;
       if (!controller.matchesFilters(e)) return;
-      list.append(rowFor(e));
-      while (list.children.length > rows) list.firstElementChild?.remove();
-      if (autoScroll) list.scrollTop = list.scrollHeight;
+      pending.push(e);
+      if (!renderTimer) renderTimer = setTimeout(flushRows, 100);
     }),
   );
   cleanups.push(controller.onFeature((f, on) => {
@@ -319,6 +338,7 @@ export function mountPanel(pulse: Pulse, options: PanelOptions = {}) {
     if (box) box.checked = on;
   }));
   cleanups.push(controller.onFilters((f) => {
+    pending.clear();
     kindsIn.value = f.kinds.join(",");
     compIn.value = f.component;
     textIn.value = f.text;
@@ -500,7 +520,7 @@ export function mountPanel(pulse: Pulse, options: PanelOptions = {}) {
     recDot.dataset.on = controller.bus.currentRecording() ? "1" : "0";
     fab.dataset.rec = controller.bus.currentRecording() ? "1" : "0";
     pauseBtn.textContent = controller.bus.paused ? "Resume" : "Pause";
-    statusText.textContent = `${controller.bus.buffer.size}/${controller.bus.buffer.capacity} buffered · ${controller.bus.buffer.dropped} dropped${pulse.bridge ? ` · ${pulse.bridge.clientId}` : ""}`;
+    statusText.textContent = `${controller.bus.buffer.size}/${controller.bus.buffer.capacity} buffered · ~${(controller.bus.bytes / 1048576).toFixed(1)}/${MAX_BUFFER_BYTES / 1048576} MiB · ${controller.bus.buffer.dropped} evicted · ${controller.bus.truncated} truncated${pulse.bridge ? ` · bridge ${pulse.bridge.dropped} dropped` : ""}`;
   }
   const statusTimer = setInterval(refreshStatus, 1000);
   cleanups.push(() => clearInterval(statusTimer));

@@ -7,6 +7,9 @@
 import type { PulseController } from "../core/controller.js";
 import { DEFAULT_PATH, PROTOCOL_VERSION, isServerFrame, type HelloFrame, type PageFrame } from "../core/protocol.js";
 import type { PulseEvent } from "../core/events.js";
+import { RingBuffer } from '../core/ring-buffer.js';
+const MAX_PENDING = 200;
+const MAX_SOCKET_BYTES = 512 * 1024;
 
 export interface BridgeClientOptions {
   /** ws(s):// URL. Default: same origin + /__pulse/ws. */
@@ -38,7 +41,9 @@ function clientIdFor(explicit?: string): string {
 export class BridgeClient {
   private ws: WebSocket | null = null;
   private timer: ReturnType<typeof setTimeout> | null = null;
-  private queue: PulseEvent[] = [];
+  private queue = new RingBuffer<PulseEvent>(MAX_PENDING);
+  dropped = 0;
+  get queued() { return this.queue.size; }
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
   private unsubscribe: (() => void) | null = null;
   private unsubscribeCommands: (() => void) | null = null;
@@ -79,10 +84,13 @@ export class BridgeClient {
         };
         ws.send(JSON.stringify(hello));
         // Replay the buffer so a CLI that connects late still sees history.
-        this.queue = this.controller.bus.list({ limit: 2000 });
+        this.queue.clear();
+        this.dropped += Math.max(0, this.controller.bus.buffer.size - MAX_PENDING);
+        for (const event of this.controller.bus.list({ limit: MAX_PENDING })) this.queue.push(event);
         this.scheduleFlush();
         this.unsubscribe?.();
         this.unsubscribe = this.controller.bus.subscribe((e) => {
+          if (this.queue.size === MAX_PENDING) this.dropped++;
           this.queue.push(e);
           this.scheduleFlush();
         });
@@ -91,6 +99,7 @@ export class BridgeClient {
       ws.onmessage = (ev) => void this.onMessage(ev.data);
       ws.onclose = () => {
         this.connected = false;
+        this.queue.clear();
         this.ws = null;
         this.unsubscribe?.();
         this.unsubscribe = null;
@@ -114,6 +123,8 @@ export class BridgeClient {
     this.closed = true;
     if (this.timer) clearTimeout(this.timer);
     if (this.flushTimer) clearTimeout(this.flushTimer);
+    this.flushTimer = null;
+    this.queue.clear();
     this.unsubscribe?.();
     this.unsubscribe = null;
     this.unsubscribeCommands?.();
@@ -132,12 +143,16 @@ export class BridgeClient {
   }
 
   private flush() {
-    if (!this.ws || this.ws.readyState !== this.NativeWebSocket.OPEN || this.queue.length === 0) return;
-    // Send in chunks so a replay of 2000 events never builds one huge frame.
-    while (this.queue.length) {
-      const chunk = this.queue.splice(0, 200);
-      this.send({ type: "events", events: chunk });
+    if (!this.ws || this.ws.readyState !== this.NativeWebSocket.OPEN || this.queue.size === 0) return;
+    // At most one small batch per tick; never queue unbounded bytes in the browser socket.
+    let sent = 0;
+    while (this.queue.size && sent < MAX_PENDING && this.ws.bufferedAmount < MAX_SOCKET_BYTES) {
+      const chunk: PulseEvent[] = [];
+      while (chunk.length < 20 && this.queue.size) chunk.push(this.queue.shift()!);
+      this.send({ type: 'events', events: chunk, dropped: this.dropped });
+      sent += chunk.length;
     }
+    if (this.queue.size) this.scheduleFlush();
   }
 
   private send(frame: PageFrame) {

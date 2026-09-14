@@ -1,4 +1,4 @@
-import { EventBus } from "./bus.js";
+import { EventBus, MAX_BUFFER_BYTES, MAX_RECORDING_BYTES } from "./bus.js";
 import { expandKinds, type PulseEvent, type PulseEventKind } from "./events.js";
 
 /** Runtime features that can be toggled by humans (panel) and agents (CLI) alike. */
@@ -189,6 +189,7 @@ export class PulseController {
         features: this.snapshotFeatures(),
         filters: this.filters,
         buffer: { size: this.bus.buffer.size, capacity: this.bus.buffer.capacity, dropped: this.bus.buffer.dropped, seq: this.bus.nextSeq - 1 },
+        retention: { bytes: this.bus.bytes, maxBytes: MAX_BUFFER_BYTES, truncatedEvents: this.bus.truncated, recordingMaxBytes: MAX_RECORDING_BYTES },
         paused: this.bus.paused,
         recording: this.bus.currentRecording()?.id ?? null,
         commands: this.commands.size,
@@ -271,7 +272,7 @@ export class PulseController {
       (a) => this.bus.emit("pulse.note", { note: String(a.text ?? "") }),
     );
     this.register(
-      { name: "record.start", summary: "Start a recording (stops any active one).", args: { id: "optional id", limit: "max events (default 20000)" }, ui: "Record tab › Start" },
+      { name: "record.start", summary: "Start a recording (stops at event or payload budget).", args: { id: "optional id", limit: "1..20000 events; also bounded by 4 MiB estimated payload" }, ui: "Record tab › Start" },
       (a) => {
         const rec = this.bus.startRecording(a.id === undefined ? undefined : String(a.id), a.limit === undefined ? undefined : Number(a.limit));
         return { id: rec.id, startedWall: rec.startedWall };

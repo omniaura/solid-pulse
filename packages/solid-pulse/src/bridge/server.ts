@@ -20,6 +20,8 @@ import { createServer } from "node:http";
 import type { Duplex } from "node:stream";
 import { WebSocketServer, type WebSocket } from "ws";
 import { RingBuffer } from "../core/ring-buffer.js";
+import { boundedData } from '../core/bounded-data.js';
+import { MAX_BUFFER_BYTES } from '../core/bus.js';
 import { expandKinds, type PulseEvent } from "../core/events.js";
 import type { CommandResult, CommandSpec } from "../core/controller.js";
 import { DEFAULT_PATH, PROTOCOL_VERSION, isPageFrame, type ClientSummary, type CommandFrame } from "../core/protocol.js";
@@ -41,6 +43,8 @@ interface ClientState {
   summary: ClientSummary;
   commands: CommandSpec[];
   buffer: RingBuffer<PulseEvent>;
+  bytes: number;
+  sizes: WeakMap<PulseEvent, number>;
   pending: Map<string, { resolve: (r: CommandResult) => void; timer: ReturnType<typeof setTimeout> }>;
 }
 
@@ -89,7 +93,8 @@ export class BridgeServer {
       commandTimeoutMs: options.commandTimeoutMs ?? 10_000,
       log: options.log ?? (() => {}),
     };
-    this.wss = new WebSocketServer({ noServer: true });
+    // Command results include bounded recording exports; retain room for those.
+    this.wss = new WebSocketServer({ noServer: true, maxPayload: 32 * 1024 * 1024 });
     this.wss.on("connection", (ws) => this.onConnection(ws));
   }
 
@@ -162,7 +167,7 @@ export class BridgeServer {
         kinds: url.searchParams.get("kinds")?.split(",").filter(Boolean),
         limit: Number(url.searchParams.get("limit") ?? 200),
       });
-      return json(res, 200, { client: c.summary.clientId, count: events.length, last: events.at(-1)?.seq ?? 0, events });
+      return json(res, 200, { client: c.summary.clientId, count: events.length, last: events.at(-1)?.seq ?? 0, dropped: c.summary.dropped ?? 0, events });
     }
     if (route === "/events/stream" && method === "GET") {
       const c = this.pick(clientParam);
@@ -175,12 +180,18 @@ export class BridgeServer {
         if (target && clientId !== target) return;
         for (const e of events) {
           if (kindSet && !kindSet.has(e.kind)) continue;
-          res.write(`event: pulse\ndata: ${JSON.stringify({ client: clientId, ...e })}\n\n`);
+          if (res.destroyed) return;
+          if (res.writableLength > 512 * 1024) {
+            // Slow tails reconnect/replay instead of retaining an unbounded HTTP queue.
+            res.destroy();
+            return;
+          }
+          res.write(`event: pulse\ndata: ${JSON.stringify({ client: clientId, dropped: this.clients.get(clientId)?.summary.dropped ?? 0, ...e })}\n\n`);
         }
       };
       this.listeners.add(listener);
       const ka = setInterval(() => res.write(":keepalive\n\n"), 15_000);
-      req.on("close", () => {
+      res.on("close", () => {
         clearInterval(ka);
         this.listeners.delete(listener);
       });
@@ -196,6 +207,7 @@ export class BridgeServer {
   }
 
   private onConnection(ws: WebSocket) {
+    ws.on('error', () => ws.close());
     let state: ClientState | null = null;
     ws.on("message", (raw) => {
       let frame: unknown;
@@ -213,6 +225,8 @@ export class BridgeServer {
           summary: { clientId: frame.clientId, url: frame.url, title: frame.title, userAgent: frame.userAgent, connectedWall: Date.now(), lastSeenWall: Date.now(), events: 0, commands: frame.commands.length },
           commands: frame.commands,
           buffer: existing?.buffer ?? new RingBuffer<PulseEvent>(this.opts.bufferSize),
+          bytes: existing?.bytes ?? 0,
+          sizes: existing?.sizes ?? new WeakMap(),
           pending: new Map(),
         };
         this.clients.set(frame.clientId, state);
@@ -226,13 +240,24 @@ export class BridgeServer {
         state.commands = frame.commands;
         state.summary.commands = frame.commands.length;
       } else if (frame.type === "events") {
+        if (typeof frame.dropped === 'number' && Number.isSafeInteger(frame.dropped) && frame.dropped >= 0) state.summary.dropped = frame.dropped;
         const fresh: PulseEvent[] = [];
         for (const e of frame.events) {
           // Replayed history after a reconnect may repeat; keep the buffer monotonic.
-          const last = state.buffer.size ? state.buffer.toArray().at(-1)!.seq : 0;
+          const last = state.buffer.last?.seq ?? 0;
           if (e.seq <= last) continue;
-          state.buffer.push(e);
-          fresh.push(e);
+          const {data,...extra} = e;
+          const snapshot = boundedData(data);
+          const envelope = boundedData(extra, 2048);
+          const event = {...envelope.value as PulseEvent, data:snapshot.value as Record<string,unknown>, ...(snapshot.truncated || envelope.truncated ? {truncated:true} : {})};
+          const size = (snapshot.chars + envelope.chars) * 2 + 128;
+          while (state.buffer.size && (state.buffer.size >= state.buffer.capacity || state.bytes + size > MAX_BUFFER_BYTES)) {
+            state.bytes -= state.sizes.get(state.buffer.shift()!) ?? 0;
+          }
+          state.sizes.set(event, size);
+          state.bytes += size;
+          state.buffer.push(event);
+          fresh.push(event);
         }
         state.summary.events += fresh.length;
         if (fresh.length) for (const l of this.listeners) l(state.summary.clientId, fresh);
@@ -296,7 +321,7 @@ export class BridgeServer {
         resolve: (result) => {
           // Keep the mirror in step with the page: a cleared page buffer must
           // not keep serving stale history to `events`.
-          if (name === "events.clear" && result.ok) c.buffer.clear();
+          if (name === "events.clear" && result.ok) { c.buffer.clear(); c.bytes = 0; }
           resolve(result);
         },
         timer,
