@@ -1,6 +1,6 @@
 {
   "name": "@omniaura/solid-pulse",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Dev-mode pulse for SolidJS apps: flash what really updates (fine-grained computations, component mounts/remounts, DOM mutations, DOM detach/reattach with focus and scroll loss, fetch/WebSocket/SSE lifecycle, Solid Query observers) with an agent-controllable bridge and CLI. Every panel control has a 1:1 CLI command. Ships the combined panel: pulse tabs plus TanStack Solid Query devtools in one drawer.",
   "type": "module",
   "main": "./dist/index.js",
