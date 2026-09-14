@@ -3,6 +3,34 @@ import { initPulse } from '../src/index.js';
 import { mountPanel, registerTool } from '../src/panel/index.js';
 
 describe('unified developer panel', () => {
+  test('fallback picking cancels on Escape, close and destruction', async () => {
+    const pulse = initPulse({ banner: false, storageKey: false });
+    const panel = mountPanel(pulse, { storageKey: false, open: true });
+    const target = document.createElement('button'); document.body.append(target);
+    const click = () => {
+      const event = new MouseEvent('click', { bubbles: true, cancelable: true });
+      target.dispatchEvent(event); expect(event.defaultPrevented).toBe(false);
+    };
+    try {
+      const picker = panel.root.querySelector<HTMLButtonElement>('[data-command="inspect.element"]')!;
+      picker.click();
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); click();
+      picker.click(); await pulse.run('panel.close'); click();
+      await pulse.run('panel.open'); picker.click(); panel.destroy(); click();
+    } finally { pulse.destroy(); target.remove(); }
+  });
+  test('an open restored panel waits for its late tool without losing intent', async () => {
+    const key = 'late-view-test';
+    localStorage.setItem(key + ':view', JSON.stringify({ version: 1, open: true, tab: 'example-tool' }));
+    const pulse = initPulse({ banner: false, storageKey: false });
+    const panel = mountPanel(pulse, { storageKey: key });
+    try {
+      expect(JSON.parse(localStorage.getItem(key + ':view')!).tab).toBe('example-tool');
+      const remove = registerTool(pulse, { id: 'example-tool', title: 'Late', mount(el) { el.textContent = 'late tool'; } });
+      expect(await pulse.run('panel.status')).toMatchObject({ ok: true, value: { open: true, tab: 'example-tool' } });
+      remove();
+    } finally { panel.destroy(); pulse.destroy(); localStorage.removeItem(key + ':view'); }
+  });
   test('corner pins persist and invalid coordinates fail closed', async () => {
     document.body.innerHTML = '<input id="focused">';
     const pulse = initPulse({ bridge: false, banner: false });
@@ -106,9 +134,15 @@ describe('unified developer panel', () => {
       window.dispatchEvent(new CustomEvent('solid-grab:ready'));
       window.dispatchEvent(new CustomEvent('solid-grab:ready'));
       expect(badgeVisible).toBe(false);
-      expect(panel.root.querySelectorAll('[data-tab="solid-grab"]').length).toBe(1);
+      expect(panel.root.querySelectorAll('[data-tab="solid-grab"]').length).toBe(0);
+      expect(panel.root.querySelectorAll('[data-slot="inspect-tools"] [data-command="grab.pick"]')).toHaveLength(1);
+      expect(await pulse.run('panel.tab', { name: 'solid-grab' })).toMatchObject({ ok: true, value: { tab: 'grab' } });
+      expect(panel.root.querySelector<HTMLButtonElement>('[data-command="inspect.element"]')!.hidden).toBe(true);
       expect(await pulse.run('grab.pick', { on: true })).toMatchObject({ ok: true, value: { picking: true } });
       expect(await pulse.run('grab.inspect', { selector: 'no-such-element' })).toMatchObject({ ok: false });
+      window.dispatchEvent(new CustomEvent('solid-grab:destroy'));
+      expect(panel.root.querySelector('[data-command="grab.pick"]')).toBeNull();
+      expect(panel.root.querySelector<HTMLButtonElement>('[data-command="inspect.element"]')!.hidden).toBe(false);
       panel.destroy();
       expect(badgeVisible).toBe(true);
       expect(picking).toBe(false);

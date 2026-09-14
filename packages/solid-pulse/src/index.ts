@@ -17,6 +17,7 @@ import { installSolid, type SolidInstrumentation } from "./solid/instrument.js";
 import { installDom, type DomInstrumentation } from "./solid/dom.js";
 import { installNetwork, type NetworkInstrumentation } from "./solid/network.js";
 import { BridgeClient, type BridgeClientOptions } from "./bridge/client.js";
+import { restorePreferences } from './preferences.js';
 
 export type { PulseEvent, PulseEventKind, ComponentRef, ElementRef, Rect } from "./core/events.js";
 export type { CommandSpec, CommandResult, Feature, Filters } from "./core/controller.js";
@@ -27,6 +28,8 @@ export type { SolidInstrumentation } from "./solid/instrument.js";
 export { describeElement, toSelector } from "./solid/dom.js";
 
 export interface PulseOptions {
+  /** Persist feature/filter choices per origin. Saved choices override initial defaults; false opts out. */
+  storageKey?: string | false;
   /** Ring-buffer capacity (default 2000 events). */
   bufferSize?: number;
   /** Initial feature flags. */
@@ -67,6 +70,7 @@ export function initPulse(options: PulseOptions = {}): Pulse {
   }
   const bus = new EventBus(options.bufferSize ?? 2000);
   const controller = new PulseController(bus, options.features);
+  const stopPreferences = restorePreferences(controller, options.storageKey ?? 'solid-pulse:preferences');
   const overlay = options.overlay === false ? null : new FlashOverlay();
   let solid: SolidInstrumentation | null = null;
   let dom: DomInstrumentation | null = null;
@@ -140,6 +144,7 @@ export function initPulse(options: PulseOptions = {}): Pulse {
     destroy() {
       if (destroyed) return;
       destroyed = true;
+      stopPreferences();
       for (const listener of [...destroyListeners]) listener();
       destroyListeners.clear();
       bridge?.disconnect();

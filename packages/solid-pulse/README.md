@@ -59,6 +59,10 @@ Read-only: it subscribes to the `QueryCache`/`MutationCache` and never changes q
 
 ### Panel placement
 
+Feature flags and event filters persist per browser origin by default. Saved choices override initial `features`; use `initPulse({ storageKey: false })` for deterministic harnesses, or a custom key to isolate configurations. All switches persist, including `captureBodies`: turn it off when finished capturing payloads. Only preferences are saved, never events, request bodies or recordings. Invalid/denied storage falls back safely. Ports are separate browser origins.
+
+The panel also remembers its open/closed state and selected tab. An explicit `open` option overrides the saved visibility; `mountPanel({ storageKey: false })` disables panel persistence independently of runtime preferences.
+
 The single Devtools launcher opens a floating, draggable panel. Use the header selector to pin it to any corner; pinned and floating positions survive reloads and remain within the viewport on resize. Choose a default that avoids your app navigation:
 
 ```ts
@@ -88,17 +92,26 @@ const remove = registerTool(pulse, {
 remove();
 ```
 
-The panel automatically discovers the supported Solid Grab runtime, including late initialization, and hosts its picker while hiding its standalone badge. Query and Scenarios appear when their adapters register commands. Other tools use `registerTool`; installing an arbitrary npm package alone does not provide an integration contract.
+The panel automatically discovers the supported Solid Grab runtime, including late initialization, and hosts its source picker inside **Inspect**, hiding its standalone badge and the fallback DOM picker. The `solid-grab` tab id remains an alias for `grab`. Tools may use `slot: "inspect"` to contribute to that view. Query and Scenarios appear when their adapters register commands. Other tools use `registerTool`; installing an arbitrary npm package alone does not provide an integration contract.
 
 ### The combined panel (pulse + TanStack Query devtools)
 
 ```ts
 import { mountPanel } from "@omniaura/solid-pulse/panel";
 import { tanstackQueryTab } from "@omniaura/solid-pulse/tanstack";
-mountPanel(pulse, { tabs: [tanstackQueryTab({ client: queryClient })] });
+mountPanel(pulse, { queryDevtools: tanstackQueryTab({
+  client: queryClient,
+  // Literal imports let the app bundler resolve these optional peers.
+  load: async () => {
+    const [{ SolidQueryDevtoolsPanel }, { render }] = await Promise.all([
+      import("@tanstack/solid-query-devtools"), import("solid-js/web"),
+    ]);
+    return { Panel: SolidQueryDevtoolsPanel, render };
+  },
+}) });
 ```
 
-One drawer, one hotkey, one CLI: solid-pulse's Pulse / Query / Grab / Scenarios / Record tabs plus TanStack's own `SolidQueryDevtoolsPanel` as a **TanStack** tab (`solid-pulse panel.open tab=tanstack`). `@tanstack/solid-query-devtools` is an optional peer loaded on first open; pass `load` to inject it (or a double) yourself.
+One drawer, one hotkey, one CLI: Pulse / Query / Inspect / Scenarios / Record. Native `SolidQueryDevtoolsPanel` loads on first opening **Query**, alongside Pulse's query commands. `panel.open tab=query` and the legacy `tab=tanstack` alias open it. The legacy `tabs: [tanstackQueryTab(...)]` API still supports a separate custom tab. TanStack's UI requires Solid's development runtime, including in built simulators; do not enable it in real production builds.
 
 ### Overlay
 

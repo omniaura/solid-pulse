@@ -5,6 +5,8 @@ import type { CommandSpec, CommandHandler } from '../core/controller.js';
 export interface Devtool {
   id: string;
   title: string;
+  /** Contribute inside an existing view instead of adding another tab. */
+  slot?: 'inspect';
   commands?: Array<{ spec: CommandSpec; run: CommandHandler }>;
   mount(el: HTMLElement, pulse: Pulse): void | (() => void);
 }
