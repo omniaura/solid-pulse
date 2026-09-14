@@ -99,6 +99,8 @@ export interface PulseEventBase {
   component?: ComponentRef | null;
   /** Free-form structured payload; shape depends on `kind`. */
   data: Record<string, unknown>;
+  /** Payload snapshot exceeded the diagnostic size/depth budget. */
+  truncated?: boolean;
 }
 
 export type PulseEvent = PulseEventBase;

@@ -151,6 +151,7 @@ export function installDom(controller: PulseController, solid: SolidInstrumentat
       detached.delete(oldest);
     }
   }
+  const pruneTimer = setInterval(() => pruneDetached(now()), DETACHED_TTL_MS);
 
   const observer = new MutationObserver((records) => {
     if ((globalThis as { __PULSE_DEBUG?: boolean }).__PULSE_DEBUG) console.error("DBG-MO", records.map((r) => `${r.type}:${(r.target as Element).tagName ?? "?"}:+${r.addedNodes.length}/-${r.removedNodes.length}`).join(" "), "dom on:", controller.isOn("dom"));
@@ -380,6 +381,10 @@ export function installDom(controller: PulseController, solid: SolidInstrumentat
     dispose() {
       observer.disconnect();
       clearInterval(focusPoll);
+      clearInterval(pruneTimer);
+      detached.clear();
+      scrollTops.clear();
+      lastFocused = null;
       document.removeEventListener("scroll", onScroll, true);
       document.removeEventListener("focusin", onFocusIn, true);
       controller.unregister("inspect.element");

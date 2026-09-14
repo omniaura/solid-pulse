@@ -1,5 +1,10 @@
 import { RingBuffer } from "./ring-buffer.js";
 import type { PulseEvent, PulseEventKind } from "./events.js";
+import { boundedData } from './bounded-data.js';
+
+export const MAX_BUFFER_BYTES = 4 * 1024 * 1024;
+export const MAX_RECORDING_BYTES = 4 * 1024 * 1024;
+export const MAX_RECORDING_EVENTS = 20_000;
 
 export type Listener = (event: PulseEvent) => void;
 
@@ -11,6 +16,8 @@ export interface Recording {
   events: PulseEvent[];
   /** Hard cap; the recording stops itself when reached. */
   limit: number;
+  bytes: number;
+  stopReason?: 'manual' | 'events' | 'bytes';
 }
 
 /**
@@ -21,12 +28,16 @@ export interface Recording {
 export class EventBus {
   readonly buffer: RingBuffer<PulseEvent>;
   private listeners = new Set<Listener>();
+  private warned = new WeakSet<Listener>();
   private seq = 0;
   private recording: Recording | null = null;
   private recordings = new Map<string, Recording>();
   /** Kinds that are muted at the source (never buffered). */
   muted = new Set<PulseEventKind>();
   paused = false;
+  bytes = 0;
+  truncated = 0;
+  private sizes = new WeakMap<PulseEvent, number>();
 
   constructor(capacity = 2000) {
     this.buffer = new RingBuffer<PulseEvent>(capacity);
@@ -38,26 +49,41 @@ export class EventBus {
 
   emit(kind: PulseEventKind, data: Record<string, unknown>, extra: Partial<PulseEvent> = {}): PulseEvent | null {
     if (this.paused || this.muted.has(kind)) return null;
+    const snapshot = boundedData(data);
+    const envelope = boundedData(extra, 2048);
+    if (snapshot.truncated || envelope.truncated) this.truncated++;
     const event: PulseEvent = {
+      ...(envelope.value as Partial<PulseEvent>),
       seq: ++this.seq,
       t: typeof performance !== "undefined" ? performance.now() : Date.now(),
       wall: Date.now(),
       kind,
-      data,
-      ...extra,
+      data: snapshot.value as Record<string, unknown>,
+      ...(snapshot.truncated || envelope.truncated ? { truncated: true } : {}),
     };
+    const size = (snapshot.chars + envelope.chars) * 2 + 128;
+    while (this.buffer.size && (this.buffer.size >= this.buffer.capacity || this.bytes + size > MAX_BUFFER_BYTES)) {
+      const old = this.buffer.shift()!;
+      this.bytes -= this.sizes.get(old) ?? 0;
+    }
+    this.sizes.set(event, size);
+    this.bytes += size;
     this.buffer.push(event);
     const rec = this.recording;
     if (rec) {
-      rec.events.push(event);
-      if (rec.events.length >= rec.limit) this.stopRecording();
+      if (rec.bytes + size > MAX_RECORDING_BYTES) this.stopRecording('bytes');
+      else {
+        rec.events.push(event);
+        rec.bytes += size;
+        if (rec.events.length >= rec.limit) this.stopRecording('events');
+      }
     }
     for (const l of this.listeners) {
       try {
         l(event);
       } catch (err) {
         // A misbehaving listener must never break the app being observed.
-        if (typeof console !== "undefined") console.warn("[solid-pulse] listener failed", err);
+        if (!this.warned.has(l) && typeof console !== "undefined") { this.warned.add(l); console.warn("[solid-pulse] listener failed (further errors suppressed)", err); }
       }
     }
     return event;
@@ -83,9 +109,12 @@ export class EventBus {
 
   clear() {
     this.buffer.clear();
+    this.bytes = 0;
+    this.truncated = 0;
   }
 
   startRecording(id?: string, limit = 20_000): Recording {
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_RECORDING_EVENTS) throw new RangeError('recording limit must be 1..' + MAX_RECORDING_EVENTS);
     if (this.recording) this.stopRecording();
     const rec: Recording = {
       id: id ?? `rec-${Date.now().toString(36)}-${(this.seq).toString(36)}`,
@@ -94,6 +123,7 @@ export class EventBus {
       stoppedAt: null,
       events: [],
       limit,
+      bytes: 0,
     };
     this.recording = rec;
     this.recordings.set(rec.id, rec);
@@ -106,10 +136,11 @@ export class EventBus {
     return rec;
   }
 
-  stopRecording(): Recording | null {
+  stopRecording(reason: 'manual' | 'events' | 'bytes' = 'manual'): Recording | null {
     const rec = this.recording;
     if (!rec) return null;
     rec.stoppedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
+    rec.stopReason = reason;
     this.recording = null;
     return rec;
   }
@@ -129,6 +160,8 @@ export class EventBus {
       stoppedAt: r.stoppedAt,
       events: r.events.length,
       active: r === this.recording,
+      bytes: r.bytes,
+      stopReason: r.stopReason,
     }));
   }
 }

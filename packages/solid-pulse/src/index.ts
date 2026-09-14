@@ -85,7 +85,7 @@ export function initPulse(options: PulseOptions = {}): Pulse {
   };
   controller.register(
     { name: "bridge.status", summary: "Bridge transport state (url, connected, client id).", ui: "panel header › bridge dot" },
-    () => ({ configured: bridge !== null, connected: bridge?.connected ?? false, url: bridge?.url ?? null, clientId: bridge?.clientId ?? null }),
+    () => ({ configured: bridge !== null, connected: bridge?.connected ?? false, url: bridge?.url ?? null, clientId: bridge?.clientId ?? null, queued: bridge?.queued ?? 0, dropped: bridge?.dropped ?? 0 }),
   );
   controller.register(
     {
