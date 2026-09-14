@@ -14,6 +14,7 @@ import { OWN_ATTR } from "../overlay/flash.js";
 import { FEATURES, type Feature } from "../core/controller.js";
 import { onTools, registeredTools } from './tools.js';
 import { discoverSolidGrab } from './grab.js';
+import { mountRecordings } from './recordings.js';
 export { registerTool, type Devtool } from './tools.js';
 
 export type PanelCorner = 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right';
@@ -101,6 +102,15 @@ const CSS = `
 .sp-status{display:flex;flex-wrap:wrap;gap:8px;color:#b6c0ce;font-size:12px;flex:0 0 100%;order:4}
 .sp-dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:#6b7280;margin-right:4px}
 .sp-dot[data-on="1"]{background:#22c55e}
+.sp-record h3{margin:0 0 6px;font-size:14px}.sp-record h4{margin:20px 0 6px;font-size:12px}
+.sp-record p{margin:6px 0 10px}.sp-record .sp-btn{min-height:32px}.sp-record .sp-btn:disabled{opacity:.55;cursor:default}
+.sp-record [hidden]{display:none}.sp-record progress{display:block;width:100%;height:6px;margin:10px 0 14px;accent-color:#fbbf24}
+.sp-record [data-record-state][data-active="true"]{color:#fca5a5}
+.sp-record-primary{border-color:#fbbf24;color:#fbbf24}.sp-record .sp-in{flex:1;min-width:160px}
+.sp-record-message:empty{display:none}.sp-record-message{color:#fbbf24}
+.sp-record-item{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:12px 0;border-bottom:1px solid #374151}
+.sp-record-item>div{flex:1;min-width:180px}.sp-record-item p{margin:4px 0 0}
+.sp-record-live{margin-top:18px;padding-top:14px;border-top:1px solid #374151}
 `;
 
 /** "Alt+Shift+P" style matcher; modifier order does not matter, key is case-insensitive. */
@@ -466,38 +476,9 @@ export function mountPanel(pulse: Pulse, options: PanelOptions = {}) {
   }
 
   // ── Record tab ───────────────────────────────────────────────────
-  const recBody = h("div", { class: "sp-body" });
-  const noteIn = h("input", { class: "sp-in", placeholder: "note text", "data-arg": "text" });
-  const recList = h("pre", { class: "sp-dim" });
-  recBody.append(
-    h("div", { class: "sp-row" },
-      h("button", { class: "sp-btn", type: "button", "data-command": "record.start", onclick: () => void run("record.start").then(() => refreshRecordings()) }, "Start recording"),
-      h("button", { class: "sp-btn", type: "button", "data-command": "record.stop", onclick: () => void run("record.stop").then(() => refreshRecordings()) }, "Stop"),
-      h("button", { class: "sp-btn", type: "button", "data-command": "record.list", onclick: () => void refreshRecordings() }, "List"),
-      h("button", { class: "sp-btn", type: "button", "data-command": "export", onclick: () => void exportJson() }, "Export JSON"),
-      noteIn,
-      h("button", { class: "sp-btn", type: "button", "data-command": "note", onclick: () => void run("note", { text: noteIn.value }).then(() => (noteIn.value = "")) }, "Add note"),
-      h("button", { class: "sp-btn", type: "button", "data-command": "events.resume", onclick: () => void run("events.resume").then(refreshStatus) }, "Resume"),
-    ),
-    recList,
-  );
-  bodies.set("record", recBody);
-
-  async function refreshRecordings() {
-    const r = await run("record.list");
-    recList.textContent = JSON.stringify(val(r), null, 2);
-    refreshStatus();
-  }
-  async function exportJson() {
-    const active = controller.bus.currentRecording();
-    const last = controller.bus.listRecordings().filter((r) => !r.active).at(-1);
-    const r = await run("export", active || !last ? { filtered: false } : { recording: last.id });
-    if (!r.ok) return showResult(recBody, r.error);
-    const blob = new Blob([JSON.stringify(r.value)], { type: "application/json" });
-    const a = h("a", { href: URL.createObjectURL(blob), download: `solid-pulse-${Date.now()}.json` });
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-  }
+  const recordings = mountRecordings(pulse, () => open && activeTab === "record");
+  bodies.set("record", recordings.body);
+  cleanups.push(recordings.dispose);
 
   for (const tab of options.tabs ?? []) {
     if (bodies.has(tab.id)) throw new Error('Duplicate tab: ' + tab.id);
@@ -587,7 +568,7 @@ export function mountPanel(pulse: Pulse, options: PanelOptions = {}) {
       }
     }
     if (id === "scenarios") void refreshScenario();
-    if (id === "record") void refreshRecordings();
+    if (id === "record") recordings.refresh();
   }
 
   function setOpen(next: boolean) {

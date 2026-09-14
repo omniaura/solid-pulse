@@ -67,6 +67,16 @@ The bridge has a 200-event pending queue, drains up to 200 events in batches of 
 
 The bridge drop counter reports pending-queue evictions and omitted replay entries, not unique end-to-end losses: reconnect replay can include previously delivered events, and disconnects can discard unsent socket data. Use event sequence gaps to identify missing history.
 
+The **Record** tab separates recordings from the rolling live log. Start recording,
+reproduce the issue, optionally add marker notes, then stop and download that
+recording's JSON. While active, **Download snapshot** exports that recording so
+far without stopping it. **Download live log** is a separate, unfiltered export
+of the rolling buffer. Capture pause affects both the live log and the active
+recording; **Resume capture** does not start a new recording. Automatic stops
+show whether the event or size limit was reached. Recordings stay in page memory
+only (latest five); download before reloading. All actions use the same
+`record.*`, `note`, `events.resume` and `export recording=<id>` commands as agents.
+
 Human Status/bridge status controls and CLI status/bridge.status expose the same limits, counters and recording stop reasons. Capturing every event is inherently work; these bounds prevent retained history and rendering queues from growing with session duration, not zero overhead.
 
 Feature flags and event filters persist per browser origin by default. Saved choices override initial `features`; use `initPulse({ storageKey: false })` for deterministic harnesses, or a custom key to isolate configurations. All switches persist, including `captureBodies`: turn it off when finished capturing payloads. Only preferences are saved, never events, request bodies or recordings. Invalid/denied storage falls back safely. Ports are separate browser origins.
