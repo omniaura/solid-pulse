@@ -51,7 +51,7 @@ describe('bounded sustained capture', () => {
       for(let i=0;i<300;i++)pulse.bus.emit('pulse.note',{note:'unmatched'});
       await wait(); expect(panel.root.textContent).toContain('/filtered');
       await pulse.run('filters.set',{kinds:''});
-      const heavy = pulse.bus.emit('dom.mutation',{summary:Array.from({length:25},()=>({tag:'div',types:['attributes'],attributes:'x'.repeat(1000)}))},{component:{id:1,name:'HeavyComponent'},flush:7})!;
+      const heavy = pulse.bus.emit('dom.mutation',{records:25,targets:25,summary:Array.from({length:25},()=>({tag:'div',id:'target',classes:['card','active'],selector:'div#target.card.active',types:['attributes'],attrs:['class','style']})),attributedTo:'single-component-flush'},{component:{id:1,name:'HeavyComponent'},flush:7})!;
       expect(heavy.truncated).toBe(true);
       expect(heavy.component?.name).toBe('HeavyComponent'); expect(heavy.flush).toBe(7);
       await wait(); expect(panel.root.textContent).toContain('[truncated]');
@@ -86,10 +86,13 @@ describe('bounded sustained capture', () => {
       expect(bridge.queued).toBe(200); expect(bridge.dropped).toBeGreaterThan(9000);
       await wait();expect(bridge.queued).toBe(200);
       expect(socket.sent.filter((f:any)=>f.type==='events')).toHaveLength(0);
-      socket.bufferedAmount=0;await wait();
-      expect(bridge.queued).toBeLessThan(200);
+      // Drive one drain tick directly: timer-based queue shrink also passes
+      // with the regressed one-batch-per-tick implementation.
+      socket.bufferedAmount=0;(bridge as any).flush();
+      expect(bridge.queued).toBe(0);
       const batches=socket.sent.filter((f:any)=>f.type==='events');
-      expect(batches.length).toBeGreaterThan(0);
+      expect(batches.length).toBe(10);
+      expect(batches.flatMap((f:any)=>f.events)).toHaveLength(200);
       expect(batches.every((f:any)=>f.events.length<=20)).toBe(true);
       bridge.disconnect();expect(bridge.queued).toBe(0);
     }finally{bridge.disconnect();globalThis.WebSocket=original;}

@@ -144,7 +144,7 @@ export class BridgeClient {
 
   private flush() {
     if (!this.ws || this.ws.readyState !== this.NativeWebSocket.OPEN || this.queue.size === 0) return;
-    // At most one small batch per tick; never queue unbounded bytes in the browser socket.
+    // Drain at most MAX_PENDING events per tick, checking backpressure between small batches.
     let sent = 0;
     while (this.queue.size && sent < MAX_PENDING && this.ws.bufferedAmount < MAX_SOCKET_BYTES) {
       const chunk: PulseEvent[] = [];
