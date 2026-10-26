@@ -119,7 +119,7 @@ describe("Solid instrumentation (dev hooks)", () => {
     expect(bus.list({ limit: 10 }).filter((e: PulseEvent) => e.kind.startsWith("solid.")).length).toBe(0);
     solid.dispose();
   });
-  test("ignores disposed leaf owners at the deferred discovery seam and detaches cleanly", async () => {
+  test("captures disposed leaf owners at the deferred discovery seam and detaches cleanly", async () => {
     const bus = new EventBus(500);
     const controller = new PulseController(bus);
     const solid = installSolid(controller);
@@ -131,7 +131,7 @@ describe("Solid instrumentation (dev hooks)", () => {
     dispose();
     await tick();
     expect(solid.components()).toEqual([]);
-    expect(bus.list({ limit: 100 }).filter(e => e.kind === "solid.component.mount")).toEqual([]);
+    expect(bus.list({ limit: 100 }).filter(e => e.kind.startsWith("solid.component")).map(e => e.kind)).toEqual(["solid.component.mount", "solid.component.dispose"]);
 
     let setCount!: (n: number) => void;
     createRoot(d => {

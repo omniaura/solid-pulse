@@ -13,14 +13,15 @@
  * Pass `load` to supply them yourself (or a test double).
  */
 
+import type { Element as SolidElement } from "solid-js";
 import type { PanelTab } from "../panel/index.js";
 import type { Pulse } from "../index.js";
 
 export interface TanstackTabDeps {
   /** `SolidQueryDevtoolsPanel` from @tanstack/solid-query-devtools (or a compatible component). */
-  Panel: (props: { client: unknown } & Record<string, unknown>) => unknown;
+  Panel: (props: { client: unknown } & Record<string, unknown>) => SolidElement;
   /** `render` from @solidjs/web. */
-  render: (code: () => unknown, el: Element) => () => void;
+  render: (code: () => SolidElement, el: Element) => () => void;
 }
 
 export interface TanstackQueryTabOptions {
@@ -37,8 +38,11 @@ export interface TanstackQueryTabOptions {
 }
 
 async function defaultLoad(): Promise<TanstackTabDeps> {
-  // Keep literal specifiers so consumer bundlers resolve the optional peers.
-  const [devtools, web] = await Promise.all([import("@tanstack/solid-query-devtools"), import("@solidjs/web")]);
+  // Opaque fallback keeps these peers optional for custom loaders. Browser
+  // bundlers should use the documented literal-import load callback.
+  const devtoolsId = "@tanstack/solid-query-devtools";
+  const webId = "@solidjs/web";
+  const [devtools, web] = await Promise.all([import(/* @vite-ignore */ devtoolsId), import(/* @vite-ignore */ webId)]);
   const Panel = (devtools as { SolidQueryDevtoolsPanel?: TanstackTabDeps["Panel"] }).SolidQueryDevtoolsPanel;
   const render = (web as { render?: TanstackTabDeps["render"] }).render;
   if (!Panel || !render) throw new Error("@tanstack/solid-query-devtools and @solidjs/web are required for the TanStack tab");

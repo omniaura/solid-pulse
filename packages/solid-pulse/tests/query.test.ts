@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { QueryClient, QueryObserver } from "@tanstack/query-core";
-import { createComponent, createRoot } from "solid-js";
+import { createComponent, createRoot, createSignal } from "solid-js";
 import { QueryClient as SolidQueryClient, QueryClientProvider, useQuery } from "@tanstack/solid-query";
 import { render } from "@solidjs/web";
 import { EventBus } from "../src/core/bus.js";
@@ -91,8 +91,9 @@ describe("Solid Query adapter", () => {
     const detach = attachQueryClient(pulse, client);
     let dispose!: () => void;
     let fetches = 0;
+    const [key, setKey] = createSignal("v6");
     function First() {
-      useQuery(() => ({ queryKey: ["v6"], queryFn: async () => { fetches++; return [1]; } }));
+      useQuery(() => ({ queryKey: [key()], queryFn: async () => { fetches++; return [1]; } }));
       return null;
     }
     function Sharing() {
@@ -109,6 +110,13 @@ describe("Solid Query adapter", () => {
     expect(observed.map(e => [e.component?.name, e.data.role])).toEqual([["First", "initiating"], ["Sharing", "sharing"]]);
     expect(fetches).toBe(1);
     expect(bus.list({ limit: 200 }).find(e => e.kind === "query.fetch.start")?.component?.name).toBe("First");
+    bus.clear();
+    setKey("v6-next");
+    await tick(20);
+    const moved = bus.list({ limit: 200 }).find(e => e.kind === "query.observe");
+    expect(moved?.component?.name).toBe("First");
+    expect(moved?.data.key).toEqual(["v6-next"]);
+    bus.clear();
     dispose();
     await tick();
     expect(bus.list({ limit: 200 }).filter(e => e.kind === "query.unobserve").map(e => e.component?.name)).toEqual(["Sharing", "First"]);

@@ -64,6 +64,7 @@ function Chat() {
   const [status, setStatus] = createSignal("connecting");
   const [draft, setDraft] = createSignal("");
   let socket: WebSocket | null = null;
+  let disposed = false;
   let lastEventID = "";
   let attempts = 0;
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -94,7 +95,7 @@ function Chat() {
     };
   };
   connect();
-  onCleanup(() => { if (timer) clearTimeout(timer); socket?.close(); });
+  onCleanup(() => { disposed = true; if (timer) clearTimeout(timer); socket?.close(); });
 
   let feed!: HTMLDivElement;
   createEffect(() => lines(), () => { feed.scrollTop = feed.scrollHeight; });

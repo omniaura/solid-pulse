@@ -81,6 +81,7 @@ export function installSolid(controller: PulseController): SolidInstrumentation 
   let lastClosed: ComponentRef[] = [];
   let roots = 0;
   let active = true;
+  const pendingOwners = new Set<OwnerLike>();
 
   const now = () => performance.now();
 
@@ -171,7 +172,7 @@ export function installSolid(controller: PulseController): SolidInstrumentation 
     };
   }
 
-  function registerComponent(owner: OwnerLike) {
+  function registerComponent(owner: OwnerLike, alreadyDisposed = false) {
     const name = owner._component?.name || owner._name?.replace(/^<|>$/g, "") || "Anonymous";
     const parent = componentInfoFor(owner._parent);
     const t = now();
@@ -209,7 +210,7 @@ export function installSolid(controller: PulseController): SolidInstrumentation 
         { flush: flushId, component: ref },
       );
     }
-    runWithOwner(owner as Owner, () => onCleanup(() => {
+    const cleanup = () => {
       const d = now();
       if (active && controller.isOn("solid")) ensureFlush();
       info.disposedAt = d;
@@ -229,7 +230,9 @@ export function installSolid(controller: PulseController): SolidInstrumentation 
           { flush: flushId, component: toRef(info) },
         );
       }
-    }));
+    };
+    if (alreadyDisposed) cleanup();
+    else runWithOwner(owner as Owner, () => onCleanup(cleanup));
   }
 
   let prevOnOwner: Fn | null = null;
@@ -242,11 +245,23 @@ export function installSolid(controller: PulseController): SolidInstrumentation 
     hooks.onOwner = ((owner: OwnerLike) => {
       prevOnOwner?.(owner);
       try {
-        hydration.set(owner, isHydrating());
         componentInfoFor(owner._parent);
-        queueMicrotask(() => {
-          if (active && !isDisposed(owner as Owner)) componentInfoFor(owner);
-        });
+        if (typeof owner._fn !== "function") {
+          hydration.set(owner, isHydrating());
+          // Component roots get their metadata just after onOwner. Batch leaf
+          // discovery; a disposal callback catches even same-turn churn.
+          runWithOwner(owner as Owner, () => onCleanup(() => {
+            pendingOwners.delete(owner);
+            if (active && owner._component && !compByOwner.has(owner)) registerComponent(owner, true);
+          }));
+          if (pendingOwners.size === 0) queueMicrotask(() => {
+            for (const pending of pendingOwners) {
+              if (active && !isDisposed(pending as Owner)) componentInfoFor(pending);
+            }
+            pendingOwners.clear();
+          });
+          pendingOwners.add(owner);
+        }
         if (typeof owner._fn === "function") wrapComputation(owner);
         else if (!owner._parent) {
           roots++;

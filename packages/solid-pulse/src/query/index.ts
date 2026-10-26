@@ -157,7 +157,8 @@ export function attachQueryClient(pulse: Pulse, client: QueryClientLike, options
       case "observerRemoved": {
         if (!e.observer) break;
         const component = observers.get(e.observer) ?? null;
-        observers.delete(e.observer);
+        // The same observer may move to another query key; the weak key
+        // releases ownership naturally when the observer itself is collected.
         bus.emit("query.unobserve", { hash, key: redactValue(key), label, observers: q.getObserversCount() }, { component });
         break;
       }

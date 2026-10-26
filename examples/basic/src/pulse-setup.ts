@@ -8,6 +8,14 @@ import { queryClient } from "./queryClient";
 
 export default function setup(pulse: Pulse) {
   attachQueryClient(pulse, queryClient);
-  mountPanel(pulse, { queryDevtools: tanstackQueryTab({ client: queryClient }) });
+  mountPanel(pulse, { queryDevtools: tanstackQueryTab({
+    client: queryClient,
+    load: async () => {
+      const [{ SolidQueryDevtoolsPanel }, { render }] = await Promise.all([
+        import("@tanstack/solid-query-devtools"), import("@solidjs/web"),
+      ]);
+      return { Panel: () => SolidQueryDevtoolsPanel({ client: queryClient }), render };
+    },
+  }) });
   attachScenarioCommands(pulse, { kind: "remote", controlUrl: `${location.origin}/__sim` });
 }
