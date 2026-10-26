@@ -1,5 +1,8 @@
 # @omniaura/solid-pulse
 
+v1 requires Solid 2.0 (`solid-js` and `@solidjs/web` ^2.0.0-rc.16).
+Use v0 (`@omniaura/solid-pulse@0`) for Solid 1.x. The example remains a client-rendered SPA.
+
 > Flash what actually updates in a SolidJS app — and give agents the same controls as humans.
 
 `solid-pulse` is dev-only instrumentation for Solid. It watches the reactive graph through Solid's official dev hooks, the DOM through a `MutationObserver`, and the network through `fetch`/`WebSocket`/`EventSource`, and turns what it sees into precisely named events:
@@ -126,7 +129,7 @@ mountPanel(pulse, { queryDevtools: tanstackQueryTab({
   // Literal imports let the app bundler resolve these optional peers.
   load: async () => {
     const [{ SolidQueryDevtoolsPanel }, { render }] = await Promise.all([
-      import("@tanstack/solid-query-devtools"), import("solid-js/web"),
+      import("@tanstack/solid-query-devtools"), import("@solidjs/web"),
     ]);
     return { Panel: SolidQueryDevtoolsPanel, render };
   },
@@ -189,15 +192,15 @@ GET  /__pulse/api/events/stream?client=&kinds=          (text/event-stream)
 - **Redaction.** URLs lose `token|key|secret|auth|session|ticket|password|signature|code` params, JWT and bearer tokens are scrubbed, headers are never captured, bodies only with the `captureBodies` feature (truncated).
 - **Bounded.** Ring buffer (2000 events), per-flush aggregation (individual computations only in verbose mode), per-frame flash caps, per-stream message caps (first 200 then every 50th), recordings capped and limited to the last five.
 - **Non-interfering.** The overlay and panel are raw DOM (no Solid), so they never appear in their own event stream, never take focus, and never shift layout. Query instrumentation is a cache subscription — no query behaviour changes.
-- **Hooks, not guesses.** Solid instrumentation uses `DEV.hooks.afterCreateOwner`/`afterUpdate` from Solid's development build and chains any hook already installed (e.g. `solid-devtools`); in a production Solid build it becomes a no-op and says so.
+- **Hooks, not guesses.** Solid instrumentation uses `DEV.hooks.onOwner`/`onUpdate` from Solid's development build and chains any hook already installed (e.g. `solid-devtools`); in a production Solid build it becomes a no-op and says so.
 
-## Reading a Suspense flip
+## Reading a Loading flip
 
-The bug class this was built for: a tracked `query.data` read under `<Suspense>` flips the boundary to its fallback and back within a couple of milliseconds, detaching the live surface — `scrollTop` resets to 0 and focus drops to `<body>` with no component cleanup. It reads as:
+Solid 2 keeps stale content visible during refetches. Pulse still detects unexpected detach/reattach cycles (for example, when a loading boundary is keyed or the app conditionally removes a panel), detaching the live surface — `scrollTop` resets to 0 and focus drops to `<body>` with no component cleanup. It reads as:
 
 ```
 dom.detach    <ChatFeed> section[data-testid=chat] scrollers=1 had focus
-dom.reattach  <ChatFeed> section[data-testid=chat] gap=2.1ms SCROLL RESET 1834→0 FOCUS LOST (Suspense in chain)
+dom.reattach  <ChatFeed> section[data-testid=chat] gap=2.1ms SCROLL RESET 1834→0 FOCUS LOST (Loading in chain)
 focus.lost    textarea — element removed from document
 ```
 

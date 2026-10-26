@@ -5,7 +5,7 @@ const browser = {
   dts: true,
   sourcemap: true,
   platform: "browser" as const,
-  external: ["solid-js", "solid-js/web", "@tanstack/query-core", "@tanstack/solid-query-devtools"],
+  external: ["solid-js", "@solidjs/web", "@tanstack/query-core", "@tanstack/solid-query-devtools"],
   target: "es2022",
 };
 
@@ -19,7 +19,7 @@ export default defineConfig([
       panel: "src/panel/index.ts",
       tanstack: "src/tanstack/index.ts",
     },
-    clean: true,
+    clean: false,
   },
   {
     entry: { bridge: "src/bridge/server.ts", vite: "src/vite.ts", cli: "src/bridge/cli.ts" },

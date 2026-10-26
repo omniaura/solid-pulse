@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { DEV, batch, createComponent, createEffect, createMemo, createRoot, createSignal } from "solid-js";
+import { DEV, createComponent, createEffect, createMemo, createRoot, createSignal } from "solid-js";
 import { EventBus } from "../src/core/bus.js";
 import { PulseController } from "../src/core/controller.js";
 import { installSolid } from "../src/solid/instrument.js";
@@ -34,9 +34,9 @@ describe("Solid instrumentation (dev hooks)", () => {
       setCount = setC;
       setShow = setS;
       const doubled = createMemo(() => count() * 2);
-      createEffect(() => void doubled());
+      createEffect(() => doubled(), () => {});
       const child = createMemo(() => (show() ? createComponent(Child, {}) : null));
-      createEffect(() => void child());
+      createEffect(() => child(), () => {});
       return "parent";
     }
 
@@ -76,19 +76,15 @@ describe("Solid instrumentation (dev hooks)", () => {
     expect(comps.every((e) => e.component?.name === "Parent")).toBe(true);
     controller.setFeature("verboseComputations", false);
 
-    // dispose then recreate the same component within one flush → remount
+    // A written dependency recomputes once at the microtask flush, rebuilding Child.
     bus.clear();
-    batch(() => {
-      setShow(false);
-      setShow(true);
-    });
+    setShow(false);
+    setShow(true);
     await tick();
-    // Even batched, the memo re-runs once and its owned scope is rebuilt: Solid
-    // really disposes and recreates Child, and that is exactly what we report —
-    // a dispose followed by a remount, never a "rerender".
     expect(kinds().filter((k) => k.startsWith("solid.component"))).toEqual(["solid.component.dispose", "solid.component.remount"]);
     expect(childRuns).toBe(2);
 
+    // The same default-batched writes produce one more dispose/remount pair.
     bus.clear();
     setShow(false);
     setShow(true);
@@ -123,4 +119,38 @@ describe("Solid instrumentation (dev hooks)", () => {
     expect(bus.list({ limit: 10 }).filter((e: PulseEvent) => e.kind.startsWith("solid.")).length).toBe(0);
     solid.dispose();
   });
+  test("ignores disposed leaf owners at the deferred discovery seam and detaches cleanly", async () => {
+    const bus = new EventBus(500);
+    const controller = new PulseController(bus);
+    const solid = installSolid(controller);
+    let dispose!: () => void;
+    createRoot(d => {
+      dispose = d;
+      createComponent(function Transient() { return null; }, {});
+    });
+    dispose();
+    await tick();
+    expect(solid.components()).toEqual([]);
+    expect(bus.list({ limit: 100 }).filter(e => e.kind === "solid.component.mount")).toEqual([]);
+
+    let setCount!: (n: number) => void;
+    createRoot(d => {
+      dispose = d;
+      createComponent(function Retained() {
+        const [count, set] = createSignal(0);
+        setCount = set;
+        createEffect(() => count(), () => {});
+        return null;
+      }, {});
+    });
+    await tick();
+    solid.dispose();
+    bus.clear();
+    setCount(1);
+    await tick();
+    dispose();
+    await tick();
+    expect(bus.list({ limit: 100 }).filter(e => e.kind.startsWith("solid."))).toEqual([]);
+  });
+
 });
