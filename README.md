@@ -1,5 +1,8 @@
 # solid-pulse
 
+v1 requires Solid 2.0 (`solid-js` and `@solidjs/web` ^2.0.0-rc.16).
+Use v0 (`@omniaura/solid-pulse@0`) for Solid 1.x. The example remains a client-rendered SPA.
+
 Dev-mode instrumentation for SolidJS apps, and a deterministic scenario simulator to run them against — both built so that **everything a human can do in the panel, an agent can do from a CLI**.
 
 | Package | What it is |
@@ -15,7 +18,7 @@ bun add -d @omniaura/solid-pulse @omniaura/scenario-sim
 
 ```ts
 // vite.config.ts
-import solid from "vite-plugin-solid";
+import solid from "@solidjs/vite-plugin";
 import solidPulse from "@omniaura/solid-pulse/vite";
 import scenarioSim from "@omniaura/scenario-sim/vite";
 import { scenarios } from "./scenarios";
@@ -32,7 +35,7 @@ export default defineConfig({
 Then, from any shell:
 
 ```bash
-npx solid-pulse tail kinds=dom.reattach,focus.lost          # watch for Suspense flips that lose scroll/focus
+npx solid-pulse tail kinds=dom.reattach,focus.lost          # watch for Loading flips that lose scroll/focus
 npx solid-pulse inspect.element selector='[data-testid=composer]'
 npx solid-pulse scenario.select name=chat-stream-drop         # the panel's Scenarios tab, as a command
 npx scenario-sim disconnect all=true drop=true --url http://localhost:5173/__sim

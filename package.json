@@ -9,7 +9,7 @@
   "scripts": {
     "build": "bun run --filter './packages/*' build",
     "test": "bun run test:unit && bun run test:e2e",
-    "typecheck": "bunx tsc -p packages/solid-pulse --noEmit",
+    "typecheck": "bunx tsc -p packages/solid-pulse --noEmit && bunx tsc -p examples/basic --noEmit",
     "check": "bun run build && bun run test && bun run typecheck",
     "test:unit": "bun --conditions=browser --conditions=development test packages/solid-pulse/tests",
     "test:e2e": "bun --conditions=browser --conditions=development test packages/solid-pulse/e2e",
@@ -20,11 +20,14 @@
     "@types/bun": "latest",
     "@types/node": "^22",
     "happy-dom": "^20.14.5",
-    "solid-js": "^1.9.0",
+    "solid-js": "2.0.0-rc.18",
     "tsup": "^8.0.0",
     "typescript": "^5.4.0",
-    "vite": "^7.0.0",
+    "vite": "^8.0.0",
     "@semantic-release/git": "^10.0.1",
-    "semantic-release": "25"
+    "semantic-release": "25",
+    "@solidjs/web": "2.0.0-rc.18",
+    "@tanstack/solid-query": "6.0.0-rc.5",
+    "@tanstack/solid-query-devtools": "6.0.0-rc.5"
   }
 }

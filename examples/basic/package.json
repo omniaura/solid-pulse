@@ -8,13 +8,15 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@tanstack/solid-query": "^5.100.0",
-    "solid-js": "^1.9.0"
+    "@tanstack/solid-query": "6.0.0-rc.5",
+    "solid-js": "2.0.0-rc.18",
+    "@solidjs/web": "2.0.0-rc.18"
   },
   "devDependencies": {
     "@omniaura/scenario-sim": "^0.1.0",
     "@omniaura/solid-pulse": "*",
-    "vite": "^7.0.0",
-    "vite-plugin-solid": "^2.11.0"
+    "vite": "^8.0.0",
+    "@solidjs/vite-plugin": "3.0.0-next.51",
+    "@tanstack/solid-query-devtools": "6.0.0-rc.5"
   }
 }
