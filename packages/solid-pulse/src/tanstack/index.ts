@@ -8,19 +8,20 @@
  *   import { tanstackQueryTab } from "@omniaura/solid-pulse/tanstack";
  *   mountPanel(pulse, { tabs: [tanstackQueryTab({ client: queryClient })] });
  *
- * `@tanstack/solid-query-devtools` and `solid-js/web` are optional peers; they
+ * `@tanstack/solid-query-devtools` and `@solidjs/web` are optional peers; they
  * are loaded lazily on first open so apps that never open the tab pay nothing.
  * Pass `load` to supply them yourself (or a test double).
  */
 
+import type { Element as SolidElement } from "solid-js";
 import type { PanelTab } from "../panel/index.js";
 import type { Pulse } from "../index.js";
 
 export interface TanstackTabDeps {
   /** `SolidQueryDevtoolsPanel` from @tanstack/solid-query-devtools (or a compatible component). */
-  Panel: (props: { client: unknown } & Record<string, unknown>) => unknown;
-  /** `render` from solid-js/web. */
-  render: (code: () => unknown, el: Element) => () => void;
+  Panel: (props: { client: unknown } & Record<string, unknown>) => SolidElement;
+  /** `render` from @solidjs/web. */
+  render: (code: () => SolidElement, el: Element) => () => void;
 }
 
 export interface TanstackQueryTabOptions {
@@ -37,14 +38,14 @@ export interface TanstackQueryTabOptions {
 }
 
 async function defaultLoad(): Promise<TanstackTabDeps> {
-  // Peer modules are resolved by the consumer's bundler; the strings are kept
-  // opaque so this package builds without them installed.
+  // Opaque fallback keeps these peers optional for custom loaders. Browser
+  // bundlers should use the documented literal-import load callback.
   const devtoolsId = "@tanstack/solid-query-devtools";
-  const webId = "solid-js/web";
+  const webId = "@solidjs/web";
   const [devtools, web] = await Promise.all([import(/* @vite-ignore */ devtoolsId), import(/* @vite-ignore */ webId)]);
   const Panel = (devtools as { SolidQueryDevtoolsPanel?: TanstackTabDeps["Panel"] }).SolidQueryDevtoolsPanel;
   const render = (web as { render?: TanstackTabDeps["render"] }).render;
-  if (!Panel || !render) throw new Error("@tanstack/solid-query-devtools and solid-js/web are required for the TanStack tab");
+  if (!Panel || !render) throw new Error("@tanstack/solid-query-devtools and @solidjs/web are required for the TanStack tab");
   return { Panel, render };
 }
 

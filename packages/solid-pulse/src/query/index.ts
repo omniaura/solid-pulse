@@ -14,9 +14,9 @@
  *   query.unobserve / query.added / query.removed
  *   mutation.start / mutation.success / mutation.error
  *
- * Component attribution works because TanStack notifies synchronously inside
- * the subscribing component's reactive owner, where `getOwner()` still points
- * at it. The overlay badge is centred on the component's DOM when known.
+ * Component attribution captures the observer's synchronous options notification
+ * inside its creating owner. Solid Query v6 later subscribes from an unowned
+ * effect callback, so the observer keeps that captured attribution. The overlay badge is centred on the component's DOM when known.
  */
 
 import type { Pulse } from "../index.js";
@@ -116,6 +116,12 @@ export function attachQueryClient(pulse: Pulse, client: QueryClientLike, options
 
   const onQuery = (e: QueryCacheNotifyEventLike) => {
     if (e.type === 'removed' || (e.type === 'updated' && e.query.state.fetchStatus === 'idle' && e.action?.type !== 'success' && e.action?.type !== 'error')) fetchStarts.delete(e.query);
+    // v6 subscribes in an unowned effect apply callback. Capture ownership
+    // from the constructor's synchronous options notification instead.
+    if (e.type === "observerOptionsUpdated" && e.observer) {
+      const component = pulse.solid?.currentComponent() ?? null;
+      if (component) observers.set(e.observer, component);
+    }
     if (!controller.isOn("query")) return;
     const q = e.query;
     const key = q.queryKey as readonly unknown[];
@@ -130,7 +136,7 @@ export function attachQueryClient(pulse: Pulse, client: QueryClientLike, options
         break;
       case "observerAdded": {
         if (!e.observer) break;
-        const component = pulse.solid?.currentComponent() ?? null;
+        const component = observers.get(e.observer) ?? pulse.solid?.currentComponent() ?? null;
         observers.set(e.observer, component);
         const count = q.getObserversCount();
         const role = count <= 1 ? "initiating" : "sharing";
@@ -151,7 +157,8 @@ export function attachQueryClient(pulse: Pulse, client: QueryClientLike, options
       case "observerRemoved": {
         if (!e.observer) break;
         const component = observers.get(e.observer) ?? null;
-        observers.delete(e.observer);
+        // The same observer may move to another query key; the weak key
+        // releases ownership naturally when the observer itself is collected.
         bus.emit("query.unobserve", { hash, key: redactValue(key), label, observers: q.getObserversCount() }, { component });
         break;
       }

@@ -45,7 +45,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsup",
+    "build": "rm -rf dist && tsup",
     "dev": "tsup --watch",
     "test": "bun --conditions=browser --conditions=development test",
     "typecheck": "tsc --noEmit",
@@ -82,9 +82,10 @@
   },
   "peerDependencies": {
     "@tanstack/query-core": ">=5.0.0",
-    "solid-js": ">=1.7.0",
+    "solid-js": "^2.0.0-rc.16",
     "vite": ">=5.0.0",
-    "@tanstack/solid-query-devtools": ">=5.0.0"
+    "@tanstack/solid-query-devtools": ">=6.0.0-rc.5",
+    "@solidjs/web": "^2.0.0-rc.16"
   },
   "peerDependenciesMeta": {
     "@tanstack/query-core": {

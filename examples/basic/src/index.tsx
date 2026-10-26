@@ -1,6 +1,6 @@
 /* @refresh reload */
-import { render } from "solid-js/web";
-import { createSignal, For, Show, Suspense, onCleanup, createEffect } from "solid-js";
+import { render } from "@solidjs/web";
+import { createSignal, For, Show, Loading, onCleanup, createEffect } from "solid-js";
 import { QueryClientProvider, useQuery, useMutation, useQueryClient } from "@tanstack/solid-query";
 import { queryClient } from "./queryClient";
 
@@ -27,7 +27,7 @@ function NotesList() {
     <ul data-testid="notes">
       <For each={notes.data?.items ?? []}>
         {(n) => (
-          <li class="row" data-note-id={n.id} classList={{ done: n.done }}>
+          <li class={["row", { done: n.done }]} data-note-id={n.id}>
             <label><input type="checkbox" checked={n.done} onChange={() => toggle.mutate(n)} /> {n.title}</label>
             <button onClick={() => remove.mutate(n.id)} aria-label={`delete ${n.title}`}>✕</button>
           </li>
@@ -64,6 +64,7 @@ function Chat() {
   const [status, setStatus] = createSignal("connecting");
   const [draft, setDraft] = createSignal("");
   let socket: WebSocket | null = null;
+  let disposed = false;
   let lastEventID = "";
   let attempts = 0;
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -94,10 +95,10 @@ function Chat() {
     };
   };
   connect();
-  onCleanup(() => { if (timer) clearTimeout(timer); socket?.close(); });
+  onCleanup(() => { disposed = true; if (timer) clearTimeout(timer); socket?.close(); });
 
   let feed!: HTMLDivElement;
-  createEffect(() => { lines(); queueMicrotask(() => { feed.scrollTop = feed.scrollHeight; }); });
+  createEffect(() => lines(), () => { feed.scrollTop = feed.scrollHeight; });
 
   return (
     <main>
@@ -117,12 +118,12 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <aside>
-        <NotesCount />
+        <Loading fallback={<h3>Loading count…</h3>}><NotesCount /></Loading>
         <button data-testid="toggle-list" onClick={() => setShowList((v) => !v)}>toggle list (remount)</button>
         <Show when={showList()}>
-          <Suspense fallback={<p>loading…</p>}>
+          <Loading fallback={<p>loading…</p>}>
             <NotesList />
-          </Suspense>
+          </Loading>
         </Show>
         <NewNote />
       </aside>

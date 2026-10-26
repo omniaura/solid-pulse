@@ -3,34 +3,25 @@
  * exist only in Solid's development build. In a production build `DEV` is
  * undefined and this module becomes a no-op — nothing is patched.
  *
- * What we see, precisely:
- *  - `afterCreateOwner(owner)` fires for every root, computation and (in dev)
- *    every component: dev components are computations carrying `.component`.
- *  - We wrap each non-component computation's `fn` so we know when a memo /
- *    effect / render-effect actually re-runs. Solid never re-runs component
- *    bodies, so there is no "rerender" to report — only these.
- *  - `afterUpdate()` marks the end of a synchronous update; together with a
- *    microtask fallback it closes a "flush" group used to attribute DOM
- *    mutations to the computations that produced them.
- *  - `sharedConfig.context` is set while hydrating, so mounts during hydration
- *    are labelled as such.
+ * Solid 2's onOwner runs before component metadata is assigned. Discover
+ * components lazily when a descendant is created or at the microtask seam.
+ * Computations expose _fn; wrapping it measures actual tracked re-executions,
+ * not component rerenders. onUpdate closes each settled flush.
  */
 
-import { DEV, getOwner, sharedConfig } from "solid-js";
+import { DEV, getOwner, isHydrating, isDisposed, onCleanup, runWithOwner } from "solid-js";
+import type { Owner } from "solid-js";
 import type { PulseController } from "../core/controller.js";
 import type { ComponentRef, Rect } from "../core/events.js";
 
 type Fn = (...args: unknown[]) => unknown;
 
 interface OwnerLike {
-  fn?: Fn;
-  component?: Fn;
-  name?: string;
-  pure?: boolean;
-  user?: boolean;
-  comparator?: unknown;
-  owner?: OwnerLike | null;
-  cleanups?: (() => void)[] | null;
+  _fn?: Fn;
+  _component?: { fn: Fn; name?: string };
+  _name?: string;
+  _type?: number;
+  _parent?: OwnerLike | null;
 }
 
 export interface ComponentInfo {
@@ -76,6 +67,7 @@ export function installSolid(controller: PulseController): SolidInstrumentation 
   const hooks = (DEV as { hooks?: Record<string, Fn | null> } | undefined)?.hooks;
 
   const compByOwner = new WeakMap<object, ComponentInfo>();
+  const hydration = new WeakMap<object, boolean>();
   const live = new Map<number, ComponentInfo>();
   const elements = new Map<number, WeakRef<Element>[]>();
   const recentDisposed = new Map<string, { t: number; flush: number }>();
@@ -88,6 +80,8 @@ export function installSolid(controller: PulseController): SolidInstrumentation 
   let componentsRan = new Map<number, ComponentRef>();
   let lastClosed: ComponentRef[] = [];
   let roots = 0;
+  let active = true;
+  const pendingOwners = new Set<OwnerLike>();
 
   const now = () => performance.now();
 
@@ -106,9 +100,10 @@ export function installSolid(controller: PulseController): SolidInstrumentation 
     let cur = owner as OwnerLike | null | undefined;
     let hops = 0;
     while (cur && hops++ < 200) {
+      if (active && cur._component && !compByOwner.has(cur)) registerComponent(cur);
       const info = compByOwner.get(cur as object);
       if (info) return info;
-      cur = cur.owner;
+      cur = cur._parent;
     }
     return null;
   }
@@ -146,41 +141,21 @@ export function installSolid(controller: PulseController): SolidInstrumentation 
   }
 
   function kindOf(owner: OwnerLike): ComputationKind {
-    if (owner.pure) return owner.comparator !== undefined ? "memo" : "computed";
-    return owner.user ? "effect" : "render";
+    if (owner._type === undefined) return "memo";
+    return owner._type === 1 ? "render" : "effect";
   }
 
   function wrapComputation(owner: OwnerLike) {
-    const orig = owner.fn;
+    const orig = owner._fn;
     if (typeof orig !== "function") return;
-    // `comparator` (memos) and `user` (effects) are assigned by their creators
-    // after createComputation returns, so the kind is settled at the first run.
-    let kind: ComputationKind = "render";
     let first = true;
-    let isComponent = false;
-    owner.fn = function pulseWrapped(this: unknown, ...args: unknown[]) {
+    owner._fn = function pulseWrapped(this: unknown, ...args: unknown[]) {
+      const kind = kindOf(owner);
       if (first) {
         first = false;
-        // Dev components are computations too: `devComponent` creates the
-        // computation (our hook fires here, before `.component` is assigned)
-        // and then runs it once with `.component` set. So the creation run is
-        // where a component reveals itself — that run is its mount. For every
-        // other computation the creation run is a mount as well, not an update.
-        if (owner.component) {
-          isComponent = true;
-          registerComponent(owner);
-        } else {
-          kind = kindOf(owner);
-        }
         return orig.apply(this, args);
       }
-      if (isComponent) {
-        // Solid never re-runs a component body; if it ever did we would still
-        // not call it a rerender — report it for what it is.
-        if (controller.isOn("solid")) bus.emit("pulse.note", { note: `component body re-executed: ${owner.name ?? "?"}` });
-        return orig.apply(this, args);
-      }
-      if (controller.isOn("solid")) {
+      if (active && controller.isOn("solid")) {
         ensureFlush();
         runs++;
         byKind[kind]++;
@@ -190,22 +165,22 @@ export function installSolid(controller: PulseController): SolidInstrumentation 
           if (!componentsRan.has(info.id)) componentsRan.set(info.id, toRef(info)!);
         }
         if (controller.isOn("verboseComputations")) {
-          bus.emit("solid.computation", { kind, name: owner.name ?? null }, { flush: flushId, component: toRef(info) });
+          bus.emit("solid.computation", { kind, name: owner._name ?? null }, { flush: flushId, component: toRef(info) });
         }
       }
       return orig.apply(this, args);
     };
   }
 
-  function registerComponent(owner: OwnerLike) {
-    const name = owner.name || owner.component?.name || "Anonymous";
-    const parent = componentInfoFor(owner.owner);
+  function registerComponent(owner: OwnerLike, alreadyDisposed = false) {
+    const name = owner._component?.name || owner._name?.replace(/^<|>$/g, "") || "Anonymous";
+    const parent = componentInfoFor(owner._parent);
     const t = now();
     const info: ComponentInfo = {
       id: nextId++,
       name,
       parent: parent?.id ?? null,
-      hydrated: Boolean((sharedConfig as { context?: unknown }).context),
+      hydrated: hydration.get(owner) ?? false,
       mountedAt: t,
       mountedWall: Date.now(),
       flush: flushId,
@@ -235,9 +210,9 @@ export function installSolid(controller: PulseController): SolidInstrumentation 
         { flush: flushId, component: ref },
       );
     }
-    (owner.cleanups ||= []).push(() => {
+    const cleanup = () => {
       const d = now();
-      if (controller.isOn("solid")) ensureFlush();
+      if (active && controller.isOn("solid")) ensureFlush();
       info.disposedAt = d;
       live.delete(info.id);
       elements.delete(info.id);
@@ -247,7 +222,7 @@ export function installSolid(controller: PulseController): SolidInstrumentation 
         if (oldest === undefined) break;
         recentDisposed.delete(oldest);
       }
-      if (controller.isOn("solid")) {
+      if (active && controller.isOn("solid")) {
         ensureFlush();
         bus.emit(
           "solid.component.dispose",
@@ -255,21 +230,40 @@ export function installSolid(controller: PulseController): SolidInstrumentation 
           { flush: flushId, component: toRef(info) },
         );
       }
-    });
+    };
+    if (alreadyDisposed) cleanup();
+    else runWithOwner(owner as Owner, () => onCleanup(cleanup));
   }
 
-  let prevAfterCreateOwner: Fn | null = null;
-  let prevAfterUpdate: Fn | null = null;
+  let prevOnOwner: Fn | null = null;
+  let prevOnUpdate: Fn | null = null;
   const available = Boolean(hooks);
 
   if (hooks) {
-    prevAfterCreateOwner = hooks.afterCreateOwner ?? null;
-    prevAfterUpdate = hooks.afterUpdate ?? null;
-    hooks.afterCreateOwner = ((owner: OwnerLike) => {
-      prevAfterCreateOwner?.(owner);
+    prevOnOwner = hooks.onOwner ?? null;
+    prevOnUpdate = hooks.onUpdate ?? null;
+    hooks.onOwner = ((owner: OwnerLike) => {
+      prevOnOwner?.(owner);
       try {
-        if (typeof owner.fn === "function") wrapComputation(owner);
-        else if (!owner.owner) {
+        componentInfoFor(owner._parent);
+        if (typeof owner._fn !== "function") {
+          hydration.set(owner, isHydrating());
+          // Component roots get their metadata just after onOwner. Batch leaf
+          // discovery; a disposal callback catches even same-turn churn.
+          runWithOwner(owner as Owner, () => onCleanup(() => {
+            pendingOwners.delete(owner);
+            if (active && owner._component && !compByOwner.has(owner)) registerComponent(owner, true);
+          }));
+          if (pendingOwners.size === 0) queueMicrotask(() => {
+            for (const pending of pendingOwners) {
+              if (active && !isDisposed(pending as Owner)) componentInfoFor(pending);
+            }
+            pendingOwners.clear();
+          });
+          pendingOwners.add(owner);
+        }
+        if (typeof owner._fn === "function") wrapComputation(owner);
+        else if (!owner._parent) {
           roots++;
           if (controller.isOn("solid")) bus.emit("solid.root", { roots });
         }
@@ -277,8 +271,8 @@ export function installSolid(controller: PulseController): SolidInstrumentation 
         console.warn("[solid-pulse] instrumentation error", err);
       }
     }) as Fn;
-    hooks.afterUpdate = () => {
-      prevAfterUpdate?.();
+    hooks.onUpdate = () => {
+      prevOnUpdate?.();
       closeFlush();
     };
   }
@@ -325,9 +319,10 @@ export function installSolid(controller: PulseController): SolidInstrumentation 
       return { x: x1, y: y1, w: x2 - x1, h: y2 - y1 };
     },
     dispose() {
+      active = false;
       if (hooks) {
-        hooks.afterCreateOwner = prevAfterCreateOwner;
-        hooks.afterUpdate = prevAfterUpdate;
+        hooks.onOwner = prevOnOwner;
+        hooks.onUpdate = prevOnUpdate;
       }
     },
   };
